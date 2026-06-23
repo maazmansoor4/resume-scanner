@@ -1,0 +1,50 @@
+{
+  "Administrative": {
+    "core": ["office suite", "ms office", "excel", "word", "calendar", "scheduling", "billing", "data entry"],
+    "supporting": ["customer service", "organization", "filing", "bookkeeping", "phone", "reception", "meetings"]
+  },
+  "Business Operations, HR & Executive": {
+    "core": ["operations", "project management", "agile", "hris", "payroll", "budgeting", "recruitment", "onboarding"],
+    "supporting": ["leadership", "strategy", "process improvement", "scrum", "jira", "policy", "analytics"]
+  },
+  "Construction, Manufacturing & Trades": {
+    "core": ["osha", "safety", "blueprints", "maintenance", "troubleshooting", "welding", "hvac", "cad"],
+    "supporting": ["quality assurance", "inspections", "hand tools", "repairs", "inventory", "machinery"]
+  },
+  "Customer Service & Hospitality": {
+    "core": ["pos", "crm", "ticketing", "billing", "reservations", "cashier", "phone support", "escalations"],
+    "supporting": ["communication", "problem solving", "multitasking", "hospitality", "satisfaction", "inquiries"]
+  },
+  "Education": {
+    "core": ["curriculum", "lesson plan", "assessment", "classroom management", "iep", "tutoring", "pedagogy"],
+    "supporting": ["mentoring", "communication", "instruction", "grading", "collaboration", "e-learning"]
+  },
+  "Finance & Accounting": {
+    "core": ["gaap", "quickbooks", "general ledger", "auditing", "tax preparation", "reconciliation", "financial statements", "excel"],
+    "supporting": ["cpa", "forecasting", "accounts payable", "accounts receivable", "compliance", "ledger", "sap"]
+  },
+  "Government, Legal & Public Safety": {
+    "core": ["litigation", "legal research", "compliance", "security", "investigation", "contract", "policy", "documentation"],
+    "supporting": ["writing", "confidentiality", "reporting", "patrol", "emergency", "regulation", "risk"]
+  },
+  "Healthcare & Personal Care": {
+    "core": ["hipaa", "ehr", "emr", "patient care", "cpr", "bls", "clinical", "medical terminology"],
+    "supporting": ["medication", "vital signs", "triage", "assessment", "nursing", "therapy", "hygiene"]
+  },
+  "Marketing, Media & Design": {
+    "core": ["seo", "sem", "google analytics", "social media", "content strategy", "adobe", "photoshop", "illustrator"],
+    "supporting": ["branding", "email marketing", "copywriting", "graphic design", "campaigns", "marketing automation"]
+  },
+  "Retail, Sales & Real Estate": {
+    "core": ["crm", "salesforce", "lead generation", "cold calling", "negotiation", "pipeline", "retail", "leasing"],
+    "supporting": ["relationship building", "closing", "prospecting", "customer relationship", "account management", "presentations"]
+  },
+  "Technology & Engineering": {
+    "core": ["software", "programming", "sql", "git", "database", "cloud", "architecture", "api", "agile"],
+    "supporting": ["debugging", "testing", "linux", "bash", "cicd", "microservices", "scrum"]
+  },
+  "Transportation & Logistics": {
+    "core": ["inventory", "shipping", "receiving", "wms", "forklift", "cdl", "logistics", "dispatch"],
+    "supporting": ["safety", "routing", "manifest", "tracking", "supply chain", "warehouse"]
+  }
+}

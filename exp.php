@@ -56,375 +56,8 @@ $winningKeywords        = [];
 function loadRolesMatrix(): array {
     $rolesFile = __DIR__ . DIRECTORY_SEPARATOR . 'roles.txt';
     if (!file_exists($rolesFile)) {
-        $defaultMatrix = [
-            'Administrative' => [
-                'Administrative Assistant',
-                'Assistant',
-                'Assistant Administrative',
-                'Assistant Manager',
-                'Clerk',
-                'Executive Assistant',
-                'Office Administrator',
-                'Office Assistant',
-                'Office Clerk',
-                'Office Coordinator',
-                'Office Manager',
-                'Office Representative',
-                'Personal Assistant',
-                'Program Assistant',
-                'Receptionist',
-                'Scheduling Coordinator',
-                'Service Assistant',
-                'Service Coordinator',
-                'Service Manager',
-                'Services Director',
-                'Unit Secretary',
-            ],
-            'Business Operations, HR & Executive' => [
-                'Business Analyst',
-                'Business Development Manager',
-                'Business Manager',
-                'CFO',
-                'Consultant',
-                'Director Assistant',
-                'Executive',
-                'General Manager',
-                'HR Generalist',
-                'HR Manager',
-                'HR Specialist',
-                'Manager',
-                'Manager Assistant',
-                'Operations Associate',
-                'Operations Coordinator',
-                'Operations Manager',
-                'Operations Supervisor',
-                'Payroll Specialist',
-                'Product Manager',
-                'Program Coordinator',
-                'Program Director',
-                'Program Manager',
-                'Program Specialist',
-                'Project Coordinator',
-                'Project Manager',
-                'Recruiter',
-                'Recruitment Manager',
-                'Regional Director',
-                'Regional Manager',
-                'Relationship Manager',
-                'Safety Manager',
-                'Safety Specialist',
-                'Senior Analyst',
-                'Senior Director',
-                'Senior Project Manager',
-                'Team Manager',
-                'Training Manager',
-                'Training Specialist',
-                'Vice President',
-            ],
-            'Construction, Manufacturing & Trades' => [
-                'Architect',
-                'Assembler',
-                'Auto Mechanic',
-                'Automotive Mechanic',
-                'Automotive Technician',
-                'Carpenter',
-                'CNC Machinist',
-                'CNC Operator',
-                'CNC Programmer',
-                'Construction Manager',
-                'Construction Project Manager',
-                'Construction Superintendent',
-                'Construction Worker',
-                'Diesel Mechanic',
-                'Electrician',
-                'Environmental Officer',
-                'Estimator',
-                'General Laborer',
-                'Handyworker',
-                'Heavy Equipment Operator',
-                'HVAC Installer',
-                'HVAC Service Technician',
-                'HVAC Technician',
-                'Journeyman Electrician',
-                'Laborer',
-                'Landscape Worker',
-                'Machine Operator',
-                'Maintenance Manager',
-                'Maintenance Supervisor',
-                'Material Handler',
-                'Nanny',
-                'Painter',
-                'Pest Control Technician',
-                'Pet Sitter',
-                'Product Engineer',
-                'Production Associate',
-                'Production Manager',
-                'Production Operator',
-                'Production Supervisor',
-                'Production Worker',
-                'Quality Assurance Analyst',
-                'Quality Assurance Engineer',
-                'Quality Assurance Inspector',
-                'Quality Assurance Manager',
-                'Quality Assurance Specialist',
-                'Quality Control Manager',
-                'Repair Technician',
-                'Sanitation Worker',
-                'Senior Technician',
-                'Service Advisor',
-                'Site Manager',
-                'Superintendent',
-                'Utility Worker',
-                'Welder',
-            ],
-            'Customer Service & Hospitality' => [
-                'Barista',
-                'Bartender',
-                'Call Center Representative',
-                'Chef',
-                'Cleaner',
-                'Cook',
-                'Customer Service',
-                'Customer Service Representative',
-                'Dishwasher',
-                'Executive Chef',
-                'Front Desk Receptionist',
-                'Hostess',
-                'Hotel Manager',
-                'Housekeeper',
-                'Kitchen Manager',
-                'Parking Attendant',
-                'Porter',
-                'Prep Cook',
-                'Restaurant Manager',
-                'Restaurant Team Member',
-                'Room Attendant',
-                'Senior Customer Service Representative',
-                'Server',
-                'Special Events Manager',
-            ],
-            'Education' => [
-                'School Teacher',
-                'Special Education Teacher',
-                'Student Assistant',
-                'Substitute Teacher',
-                'Teacher',
-                'Teaching Assistant',
-                'Tutor',
-            ],
-            'Finance & Accounting' => [
-                'Accountant',
-                'Accounting Clerk',
-                'Accounts Payable Specialist',
-                'Accounts Receivable Specialist',
-                'Banker',
-                'Bookkeeper',
-                'Branch Manager',
-                'Controller',
-                'Cost Accountant',
-                'CPA',
-                'Finance Manager',
-                'Financial Advisor',
-                'Financial Analyst',
-                'Insurance Agent',
-                'Insurance Sales',
-                'Loan Officer',
-                'Risk Manager',
-                'Senior Financial Analyst',
-                'Teller',
-            ],
-            'Government, Legal & Public Safety' => [
-                'Attorney',
-                'Law Enforcement Officer',
-                'Legal Assistant',
-                'Legal Secretary',
-                'Paralegal',
-                'Police Officer',
-                'Public Safety Officer',
-                'Security Guard',
-                'Security Officer',
-                'Security Specialist',
-            ],
-            'Healthcare & Personal Care' => [
-                'Beauty Therapist',
-                'Care Assistant',
-                'Caregiver',
-                'Case Manager',
-                'Certified Medical Assistant',
-                'Certified Nursing Assistant',
-                'Cosmetologist',
-                'Counselor',
-                'Dental Assistant',
-                'Dental Hygienist',
-                'Dental Receptionist',
-                'Dentist',
-                'Director of Nursing',
-                'Esthetician',
-                'Hair Stylist',
-                'Home Health Aide',
-                'Lab Technician',
-                'Licensed Practical Nurse',
-                'Massage Therapist',
-                'Medical Assistant',
-                'Medical Billing Specialist',
-                'Medical Receptionist',
-                'Nurse Practitioner',
-                'Nursing Assistant',
-                'Nursing Case Manager',
-                'Occupational Therapist',
-                'Operating Nurse',
-                'Patient Access Manager',
-                'Patient Assistant',
-                'Patient Coordinator',
-                'Patient Service Representative',
-                'Pharmacist',
-                'Pharmacy Technician',
-                'Phlebotomist',
-                'Physical Therapist Assistant',
-                'Physical Therapy Aide',
-                'Physician',
-                'Physician Assistant',
-                'Registered Nurse',
-                'Research Assistant',
-                'Resident Assistant',
-                'Social Worker',
-                'Speech Language Pathologist',
-                'Sterile Processing Technician',
-                'Substance Abuse Counselor',
-                'Surgical Nurse',
-                'Surgical Technician',
-                'Technician',
-                'Therapist',
-                'Trainer',
-                'Veterinary Assistant',
-                'Veterinary Receptionist',
-                'Veterinary Technician',
-                'X-Ray Technician',
-            ],
-            'Marketing, Media & Design' => [
-                'Designer',
-                'Digital Marketing Specialist',
-                'Director Marketing',
-                'Editor',
-                'Graphic Design',
-                'Interior Designer',
-                'Marketing',
-                'Marketing Coordinator',
-                'Marketing Manager',
-                'Outreach Coordinator',
-                'Photographer',
-                'Producer',
-                'Product Specialist',
-                'Production Assistant',
-                'Sales and Marketing Manager',
-                'Social Media Intern',
-                'Social Media Specialist',
-            ],
-            'Retail, Sales & Real Estate' => [
-                'Account Executive',
-                'Assistant Store Manager',
-                'Buyer',
-                'Car Sales',
-                'Cashier',
-                'Cashier Customer Service',
-                'Director Sales',
-                'District Manager',
-                'Inside Sales',
-                'Leasing Consultant',
-                'Merchandiser',
-                'Outside Sales Rep',
-                'Packer',
-                'Property Manager',
-                'Real Estate Agent',
-                'Real Estate Manager',
-                'Regional Sales Manager',
-                'Retail Assistant Manager',
-                'Retail Associate',
-                'Retail Manager',
-                'Retail Merchandiser',
-                'Route Sales Representative',
-                'Sales Associate',
-                'Sales Consultant',
-                'Sales Director',
-                'Sales Manager',
-                'Sales Professional',
-                'Sales Representative',
-                'Sales Specialist',
-                'Sales Support Representative',
-                'Seasonal Associate',
-                'Shift Leader',
-                'Shift Manager',
-                'Stock Associate',
-                'Stocker',
-                'Store Clerk',
-                'Team Member',
-                'Telemarketing',
-                'Territory Manager',
-            ],
-            'Technology & Engineering' => [
-                'Android Developer',
-                'Chemist',
-                'Civil Engineer',
-                'Data Analyst',
-                'Data Entry Clerk',
-                'Data Scientist',
-                'Desktop Support',
-                'DevOps Engineer',
-                'Electrical Engineer',
-                'Electrical Engineering',
-                'Embedded Software Engineer',
-                'Front End Developer',
-                'Hadoop Developer',
-                'Help Desk Associate',
-                'IOS Developer',
-                'IT',
-                'IT Project Manager',
-                'Java Developer',
-                'Linux Administrator',
-                'Mechanical Engineer',
-                'Operations Analyst',
-                'Process Engineer',
-                'Program Analyst',
-                'Research Associate',
-                'Senior Engineer',
-                'Service Technician',
-                'Software Architect',
-                'Software Developer',
-                'Software Engineer',
-                'Support Specialist',
-                'System Engineer',
-                'Systems Administrator',
-                'Systems Analyst',
-                'Technical Program Manager',
-                'Technical Writer',
-                'Technologist',
-            ],
-            'Transportation & Logistics' => [
-                'CDL Driver',
-                'Delivery Driver',
-                'Dispatcher',
-                'Forklift Operator',
-                'Logistics Specialist',
-                'Order Picker',
-                'Package Handler',
-                'Receiving Associate',
-                'Replenishment Associate',
-                'Route Driver',
-                'Rural Carrier Associate',
-                'Secretary Warehouse Manager',
-                'Shipping and Receiving Clerk',
-                'Shuttle Driver',
-                'Supply Chain Manager',
-                'Transporter',
-                'Truck Driver',
-                'Unloader',
-                'Van Driver',
-                'Warehouse Clerk',
-                'Warehouse Delivery Driver',
-                'Warehouse Supervisor',
-                'Warehouse Worker',
-            ],
-        ];
+        $defaultMatrixFile = __DIR__ . DIRECTORY_SEPARATOR . 'default_matrix.json';
+        $defaultMatrix = file_exists($defaultMatrixFile) ? json_decode(file_get_contents($defaultMatrixFile), true) : [];
         return ['matrix' => $defaultMatrix, 'descriptions' => []];
     }
     $content = file_get_contents($rolesFile);
@@ -647,95 +280,16 @@ $fieldIcons = [
     'Transportation & Logistics' => '🚚'
 ];
 
-$fieldMatrices = [
-    'Administrative' => [
-        'core' => ['office suite', 'ms office', 'excel', 'word', 'calendar', 'scheduling', 'billing', 'data entry'],
-        'supporting' => ['customer service', 'organization', 'filing', 'bookkeeping', 'phone', 'reception', 'meetings']
-    ],
-    'Business Operations, HR & Executive' => [
-        'core' => ['operations', 'project management', 'agile', 'hris', 'payroll', 'budgeting', 'recruitment', 'onboarding'],
-        'supporting' => ['leadership', 'strategy', 'process improvement', 'scrum', 'jira', 'policy', 'analytics']
-    ],
-    'Construction, Manufacturing & Trades' => [
-        'core' => ['osha', 'safety', 'blueprints', 'maintenance', 'troubleshooting', 'welding', 'hvac', 'cad'],
-        'supporting' => ['quality assurance', 'inspections', 'hand tools', 'repairs', 'inventory', 'machinery']
-    ],
-    'Customer Service & Hospitality' => [
-        'core' => ['pos', 'crm', 'ticketing', 'billing', 'reservations', 'cashier', 'phone support', 'escalations'],
-        'supporting' => ['communication', 'problem solving', 'multitasking', 'hospitality', 'satisfaction', 'inquiries']
-    ],
-    'Education' => [
-        'core' => ['curriculum', 'lesson plan', 'assessment', 'classroom management', 'iep', 'tutoring', 'pedagogy'],
-        'supporting' => ['mentoring', 'communication', 'instruction', 'grading', 'collaboration', 'e-learning']
-    ],
-    'Finance & Accounting' => [
-        'core' => ['gaap', 'quickbooks', 'general ledger', 'auditing', 'tax preparation', 'reconciliation', 'financial statements', 'excel'],
-        'supporting' => ['cpa', 'forecasting', 'accounts payable', 'accounts receivable', 'compliance', 'ledger', 'sap']
-    ],
-    'Government, Legal & Public Safety' => [
-        'core' => ['litigation', 'legal research', 'compliance', 'security', 'investigation', 'contract', 'policy', 'documentation'],
-        'supporting' => ['writing', 'confidentiality', 'reporting', 'patrol', 'emergency', 'regulation', 'risk']
-    ],
-    'Healthcare & Personal Care' => [
-        'core' => ['hipaa', 'ehr', 'emr', 'patient care', 'cpr', 'bls', 'clinical', 'medical terminology'],
-        'supporting' => ['medication', 'vital signs', 'triage', 'assessment', 'nursing', 'therapy', 'hygiene']
-    ],
-    'Marketing, Media & Design' => [
-        'core' => ['seo', 'sem', 'google analytics', 'social media', 'content strategy', 'adobe', 'photoshop', 'illustrator'],
-        'supporting' => ['branding', 'email marketing', 'copywriting', 'graphic design', 'campaigns', 'marketing automation']
-    ],
-    'Retail, Sales & Real Estate' => [
-        'core' => ['crm', 'salesforce', 'lead generation', 'cold calling', 'negotiation', 'pipeline', 'retail', 'leasing'],
-        'supporting' => ['relationship building', 'closing', 'prospecting', 'customer relationship', 'account management', 'presentations']
-    ],
-    'Technology & Engineering' => [
-        'core' => ['software', 'programming', 'sql', 'git', 'database', 'cloud', 'architecture', 'api', 'agile'],
-        'supporting' => ['debugging', 'testing', 'linux', 'bash', 'cicd', 'microservices', 'scrum']
-    ],
-    'Transportation & Logistics' => [
-        'core' => ['inventory', 'shipping', 'receiving', 'wms', 'forklift', 'cdl', 'logistics', 'dispatch'],
-        'supporting' => ['safety', 'routing', 'manifest', 'tracking', 'supply chain', 'warehouse']
-    ]
-];
+$fieldMatrices = (function() {
+    $f = __DIR__ . DIRECTORY_SEPARATOR . 'field_matrices.json';
+    return file_exists($f) ? (json_decode(file_get_contents($f), true) ?? []) : [];
+})();
 
-$roleMatrices = [
-    'Java Developer' => [
-        'core' => ['java', 'spring', 'spring boot', 'hibernate', 'maven', 'gradle', 'junit', 'jpa', 'jdbc', 'multithreading', 'concurrency'],
-        'supporting' => ['sql', 'rest', 'api', 'git', 'docker', 'microservices', 'tomcat', 'databases', 'web technologies', 'testing', 'scrum', 'agile', 'backbone', 'security']
-    ],
-    'Senior Engineer' => [
-        'core' => ['engineering', 'design', 'python', 'java', 'javascript', 'software', 'programming', 'architecture', 'development'],
-        'supporting' => ['cad', 'inspection', 'safety', 'project management', 'agile', 'git', 'testing', 'debugging', 'osha']
-    ],
-    'Android Developer' => [
-        'core' => ['android', 'kotlin', 'java', 'sdk', 'gradle', 'retrofit', 'jetpack compose', 'android studio'],
-        'supporting' => ['git', 'api', 'xml', 'mvvm', 'sqlite', 'rxjava', 'coroutine', 'testing']
-    ],
-    'IOS Developer' => [
-        'core' => ['ios', 'swift', 'objective-c', 'xcode', 'cocoapods', 'swiftui', 'core data', 'combine'],
-        'supporting' => ['git', 'api', 'mvvm', 'core data', 'testing', 'jenkins', 'testflight']
-    ],
-    'DevOps Engineer' => [
-        'core' => ['devops', 'terraform', 'kubernetes', 'docker', 'jenkins', 'ci/cd', 'aws', 'gcp', 'azure', 'pipelines'],
-        'supporting' => ['linux', 'bash', 'ansible', 'git', 'nginx', 'helm', 'prometheus', 'grafana', 'vault']
-    ],
-    'Front End Developer' => [
-        'core' => ['react', 'javascript', 'typescript', 'next\.js', 'vue', 'angular', 'svelte', 'webpack', 'html', 'css'],
-        'supporting' => ['tailwind', 'css', 'sass', 'figma', 'html', 'frontend', 'ui', 'ux', 'git']
-    ],
-    'Data Scientist' => [
-        'core' => ['python', 'pandas', 'numpy', 'spark', 'airflow', 'bigquery', 'tensorflow', 'machine learning', 'pytorch', 'scikit-learn'],
-        'supporting' => ['sql', 'etl', 'tableau', 'statistics', 'regression', 'nlp', 'r', 'data visualization']
-    ],
-    'Data Analyst' => [
-        'core' => ['sql', 'excel', 'tableau', 'power bi', 'python', 'pandas', 'data visualization', 'reporting'],
-        'supporting' => ['cleaning', 'etl', 'statistics', 'dashboards', 'analytical', 'queries']
-    ],
-    'Civil Engineer' => [
-        'core' => ['cad', 'autocad', 'civil 3d', 'structural', 'infrastructure', 'gis', 'construction management'],
-        'supporting' => ['inspections', 'safety', 'excel', 'project management', 'permits', 'design']
-    ]
-];
+$roleMatrices = (function() {
+    $f = __DIR__ . DIRECTORY_SEPARATOR . 'role_matrices.json';
+    return file_exists($f) ? (json_decode(file_get_contents($f), true) ?? []) : [];
+})();
+
 
 
 /**
@@ -1606,9 +1160,27 @@ function mapStructuredJsonToSections(array $structured): array {
     $secs = $structured['sections'] ?? [];
     $sections = [];
 
-    foreach (['skills', 'summary', 'projects', 'certifications', 'culture'] as $key) {
+    // Plain text sections that PHP parsers still need as raw text
+    foreach (['skills', 'summary', 'certifications', 'culture'] as $key) {
         if (!empty($secs[$key])) {
             $sections[$key] = $secs[$key];
+        }
+    }
+
+    // Projects: may be a structured array (from JS spatial parseProjectRows) or raw text.
+    // Convert array → clean text so parseProjects() sees proper project-name lines and bullets.
+    if (!empty($secs['projects'])) {
+        if (is_array($secs['projects'])) {
+            $projLines = [];
+            foreach ($secs['projects'] as $proj) {
+                if (!empty($proj['name'])) $projLines[] = $proj['name'];
+                foreach (($proj['bullets'] ?? []) as $b) {
+                    $projLines[] = "\u2022 " . $b;
+                }
+            }
+            $sections['projects'] = implode("\n", $projLines);
+        } else {
+            $sections['projects'] = $secs['projects'];
         }
     }
 
@@ -3610,6 +3182,54 @@ $scoreLabel = get_score_label($atsScore);
         return jobs;
     }
 
+    // Parse project section rows into structured entries.
+    // Uses X-position to tell project headers (left-margin) from wrapped bullet
+    // continuation lines (indented), which fixes the issue where multi-line
+    // bullet text was misidentified as a new project name.
+    function parseProjectRows(rows) {
+        if (!rows || rows.length === 0) return [];
+
+        // Determine the left margin from the minimum token X in the section
+        let leftMargin = Infinity;
+        for (const row of rows) {
+            if (row.tokens && row.tokens.length > 0) {
+                leftMargin = Math.min(leftMargin, row.tokens[0].x);
+            }
+        }
+        if (!isFinite(leftMargin)) leftMargin = 0;
+
+        const projects = [];
+        let cur = null;
+
+        for (const row of rows) {
+            const text = row.text.trim();
+            if (!text) continue;
+
+            const bulletMatch = text.match(BULLET_RE);
+            const firstX = (row.tokens && row.tokens.length > 0) ? row.tokens[0].x : leftMargin;
+            // A row is at the left margin if its first token starts within 25pt of leftMargin
+            const isAtLeftMargin = (firstX - leftMargin) <= 25;
+
+            if (bulletMatch) {
+                if (!cur) cur = { name: '', bullets: [] };
+                cur.bullets.push(bulletMatch[1].trim());
+            } else if (isAtLeftMargin) {
+                // Left-aligned non-bullet → new project header
+                if (cur) projects.push(cur);
+                cur = { name: text, bullets: [] };
+            } else {
+                // Indented non-bullet → wrapped continuation of last bullet
+                if (cur && cur.bullets.length > 0) {
+                    cur.bullets[cur.bullets.length - 1] += ' ' + text;
+                } else if (cur) {
+                    cur.name += ' ' + text; // subtitle / extra info on project title
+                }
+            }
+        }
+        if (cur) projects.push(cur);
+        return projects;
+    }
+
     function buildResumeText(structured) {
         const parts = [];
         if (structured.header)          parts.push(structured.header);
@@ -3624,7 +3244,17 @@ $scoreLabel = get_score_label($atsScore);
             }
         }
         if (structured.sections.education_text) parts.push('EDUCATION\n' + structured.sections.education_text);
-        if (structured.sections.projects)        parts.push('PROJECTS\n'  + structured.sections.projects);
+        if (structured.sections.projects) {
+            if (Array.isArray(structured.sections.projects)) {
+                parts.push('PROJECTS');
+                for (const p of structured.sections.projects) {
+                    if (p.name) parts.push(p.name);
+                    for (const b of p.bullets) parts.push('\u2022 ' + b);
+                }
+            } else {
+                parts.push('PROJECTS\n' + structured.sections.projects);
+            }
+        }
         if (structured.sections.culture)         parts.push(structured.sections.culture);
         return parts.join('\n\n');
     }
@@ -3686,7 +3316,12 @@ $scoreLabel = get_score_label($atsScore);
         if (buckets.education) {
             structured.sections.education_text = buckets.education.map(r => r.text).join('\n');
         }
-        for (const key of ['skills', 'summary', 'projects', 'certifications', 'culture']) {
+        // Skills, summary, projects, certifications, culture → raw text
+        // Projects uses spatial parseProjectRows() for correct header vs continuation detection
+        if (buckets.projects) {
+            structured.sections.projects = parseProjectRows(buckets.projects);
+        }
+        for (const key of ['skills', 'summary', 'certifications', 'culture']) {
             if (buckets[key]) {
                 structured.sections[key] = buckets[key].map(r => r.text).join('\n');
             }

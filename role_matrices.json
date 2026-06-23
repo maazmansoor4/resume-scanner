@@ -1,0 +1,38 @@
+{
+  "Java Developer": {
+    "core": ["java", "spring", "spring boot", "hibernate", "maven", "gradle", "junit", "jpa", "jdbc", "multithreading", "concurrency"],
+    "supporting": ["sql", "rest", "api", "git", "docker", "microservices", "tomcat", "databases", "web technologies", "testing", "scrum", "agile", "backbone", "security"]
+  },
+  "Senior Engineer": {
+    "core": ["engineering", "design", "python", "java", "javascript", "software", "programming", "architecture", "development"],
+    "supporting": ["cad", "inspection", "safety", "project management", "agile", "git", "testing", "debugging", "osha"]
+  },
+  "Android Developer": {
+    "core": ["android", "kotlin", "java", "sdk", "gradle", "retrofit", "jetpack compose", "android studio"],
+    "supporting": ["git", "api", "xml", "mvvm", "sqlite", "rxjava", "coroutine", "testing"]
+  },
+  "IOS Developer": {
+    "core": ["ios", "swift", "objective-c", "xcode", "cocoapods", "swiftui", "core data", "combine"],
+    "supporting": ["git", "api", "mvvm", "core data", "testing", "jenkins", "testflight"]
+  },
+  "DevOps Engineer": {
+    "core": ["devops", "terraform", "kubernetes", "docker", "jenkins", "ci/cd", "aws", "gcp", "azure", "pipelines"],
+    "supporting": ["linux", "bash", "ansible", "git", "nginx", "helm", "prometheus", "grafana", "vault"]
+  },
+  "Front End Developer": {
+    "core": ["react", "javascript", "typescript", "next\\.js", "vue", "angular", "svelte", "webpack", "html", "css"],
+    "supporting": ["tailwind", "css", "sass", "figma", "html", "frontend", "ui", "ux", "git"]
+  },
+  "Data Scientist": {
+    "core": ["python", "pandas", "numpy", "spark", "airflow", "bigquery", "tensorflow", "machine learning", "pytorch", "scikit-learn"],
+    "supporting": ["sql", "etl", "tableau", "statistics", "regression", "nlp", "r", "data visualization"]
+  },
+  "Data Analyst": {
+    "core": ["sql", "excel", "tableau", "power bi", "python", "pandas", "data visualization", "reporting"],
+    "supporting": ["cleaning", "etl", "statistics", "dashboards", "analytical", "queries"]
+  },
+  "Civil Engineer": {
+    "core": ["cad", "autocad", "civil 3d", "structural", "infrastructure", "gis", "construction management"],
+    "supporting": ["inspections", "safety", "excel", "project management", "permits", "design"]
+  }
+}
