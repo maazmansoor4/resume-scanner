@@ -1276,55 +1276,86 @@ function parseEducation(string $eduText): array {
         $gpa = '';
         if (preg_match('/\b(?:GPA|Grade|Score|Marks|CGPA)?\b\s*\(?\s*([0-4]\.\d+\s*(?:\/\s*4(?:\.0)?)?)\s*\)?/i', $line, $gm)) {
             $gpa = $gm[0];
-            // Remove GPA substring from the line for degree/uni matching
             $lineCleaned = trim(str_replace($gpa, '', $line), " \t\n\r\0\x0B(),");
         } else {
             $lineCleaned = $line;
         }
 
-        $isDegree = preg_match('/\b(Master|Bachelor|M\.S\.|B\.S\.|B\.A\.|M\.A\.|B\.Sc\.|M\.Sc\.|B\.E\.|B\.Tech|Degree|Diploma|Graduate|Engineering|Science|Arts|Business)\b/i', $lineCleaned);
+        $isDegree = preg_match('/\b(Master|Masters|Bachelor|Bachelors|M\.S\.|B\.S\.|B\.A\.|M\.A\.|B\.Sc\.|M\.Sc\.|B\.E\.|B\.Tech|Degree|Diploma|Graduate|Engineering|Science|Arts|Business)\b/i', $lineCleaned);
         $isUni = preg_match('/\b(University|College|Institute|School|Academy|Polytechnic|State)\b/i', $lineCleaned);
 
         if ($isDegree) {
-            if ($currentDegree) {
-                $degrees[] = $currentDegree;
-            }
-            $currentDegree = [
-                'course' => $lineCleaned,
-                'university' => '',
-                'grade' => $gpa
-            ];
-        } elseif ($isUni) {
-            if (!$currentDegree) {
+            if ($currentDegree && empty($currentDegree['course'])) {
+                // We had a pending university block (e.g. Pennsylvania State University) that had no degree course yet
+                $currentDegree['course'] = $lineCleaned;
+                if (!empty($gpa)) {
+                    $currentDegree['grade'] = $gpa;
+                }
+            } else {
+                if ($currentDegree) {
+                    $degrees[] = $currentDegree;
+                }
                 $currentDegree = [
-                    'course' => 'Degree / Course Not Specified',
-                    'university' => $lineCleaned,
+                    'course' => $lineCleaned,
+                    'university' => '',
                     'grade' => $gpa
                 ];
-            } else {
+            }
+        } elseif ($isUni) {
+            if ($currentDegree && empty($currentDegree['university'])) {
                 $currentDegree['university'] = $lineCleaned;
                 if (!empty($gpa)) {
                     $currentDegree['grade'] = $gpa;
                 }
-            }
-        } else {
-            if (!empty($gpa)) {
-                if ($currentDegree) {
-                    $currentDegree['grade'] = $gpa;
-                }
             } else {
                 if ($currentDegree) {
-                    if (empty($currentDegree['university'])) {
-                        $currentDegree['university'] = $lineCleaned;
-                    }
+                    $degrees[] = $currentDegree;
                 }
+                $currentDegree = [
+                    'course' => '',
+                    'university' => $lineCleaned,
+                    'grade' => $gpa
+                ];
+            }
+        } else {
+            if (!empty($gpa) && $currentDegree) {
+                $currentDegree['grade'] = $gpa;
             }
         }
     }
     if ($currentDegree) {
         $degrees[] = $currentDegree;
     }
-    return $degrees;
+
+    // Filter out entries that have neither a recognized course nor a recognized university
+    $filtered = [];
+    foreach ($degrees as $d) {
+        $course = $d['course'] ?? '';
+        $uni = $d['university'] ?? '';
+
+        // Ignore lines that look like bullet lists, bullet points, headers of other sections, or work bullets
+        if (preg_match('/^[\x{2022}\x{2023}\x{2043}\x{204B}•\-*✦]\s*/u', trim($course)) || preg_match('/^[\x{2022}\x{2023}\x{2043}\x{204B}•\-*✦]\s*/u', trim($uni))) {
+            continue;
+        }
+
+        // Ignore if the course/university contains key verbs that match work experience details instead of a school name
+        if (preg_match('/\b(allocate|manage|organize|conducted|designed|produced|redesigned|modernized|supervise|calculate|communicate)\b/i', $course . ' ' . $uni)) {
+            continue;
+        }
+
+        if (!empty($course) || !empty($uni)) {
+            if (empty($course)) {
+                $course = 'Degree / Course Not Specified';
+            }
+            if (empty($uni)) {
+                $uni = 'Institution Not Specified';
+            }
+            $d['course'] = $course;
+            $d['university'] = $uni;
+            $filtered[] = $d;
+        }
+    }
+    return $filtered;
 }
 
 /**
