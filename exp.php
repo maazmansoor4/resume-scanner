@@ -1,6 +1,6 @@
 <?php
 // =========================================================================
-// ATS RESUME ARCHETYPE SCANNER — exp.php (Synchronized Copy)
+// ATS RESUME ARCHETYPE SCANNER — ats_scanner.php
 // A single-file PHP application that accepts a PDF resume upload,
 // extracts its text cleanly, then scores it against engineering archetypes.
 // Styled with Google Gemini Light Theme and formatted for Company Profile Breakdown.
@@ -49,6 +49,266 @@ $winningKeywords        = [];
 // =========================================================================
 // SECTION 2 — PDF TEXT EXTRACTION, SCORING & PARSING UTILITIES
 // =========================================================================
+
+/**
+ * Load and parse roles.txt from the filesystem.
+ */
+function loadRolesMatrix(): array {
+    $rolesFile = __DIR__ . DIRECTORY_SEPARATOR . 'roles.txt';
+    if (!file_exists($rolesFile)) {
+        return ['matrix' => [], 'descriptions' => []];
+    }
+    $content = file_get_contents($rolesFile);
+    $lines = explode("\n", $content);
+
+    $headers = [
+        'Administrative',
+        'Business Operations, HR & Executive',
+        'Construction, Manufacturing & Trades',
+        'Customer Service & Hospitality',
+        'Education',
+        'Finance & Accounting',
+        'Government, Legal & Public Safety',
+        'Healthcare & Personal Care',
+        'Marketing, Media & Design',
+        'Retail, Sales & Real Estate',
+        'Technology & Engineering',
+        'Transportation & Logistics'
+    ];
+
+    $matrix = [];
+    $currentField = '';
+    $descriptions = [];
+
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if (empty($line)) continue;
+
+        if (in_array($line, $headers)) {
+            $currentField = $line;
+            $matrix[$currentField] = [];
+            continue;
+        }
+
+        if ($currentField) {
+            if (!isset($descriptions[$currentField])) {
+                $descriptions[$currentField] = $line;
+            } else {
+                $matrix[$currentField][] = $line;
+            }
+        }
+    }
+    return [
+        'matrix' => $matrix,
+        'descriptions' => $descriptions
+    ];
+}
+
+/**
+ * Filter the resume text to exclude company names and dates to avoid false positives during skill matching.
+ */
+function getSkillSearchText(string $resumeText, array $sections, array $parsedExp): string {
+    $searchParts = [];
+    if (!empty($sections['summary'])) {
+        $searchParts[] = $sections['summary'];
+    }
+    if (!empty($sections['skills'])) {
+        $searchParts[] = $sections['skills'];
+    }
+    if (!empty($sections['certifications'])) {
+        $searchParts[] = $sections['certifications'];
+    }
+    if (!empty($sections['projects'])) {
+        $searchParts[] = $sections['projects'];
+    }
+    foreach ($parsedExp as $job) {
+        if (!empty($job['role'])) {
+            $searchParts[] = $job['role'];
+        }
+        if (!empty($job['bullets'])) {
+            $searchParts[] = implode(' ', $job['bullets']);
+        }
+    }
+    if (empty($searchParts)) {
+        return $resumeText;
+    }
+    return implode(' ', $searchParts);
+}
+
+/**
+ * Detect the candidate's primary job role and industry field.
+ */
+function detectJobRoleAndField(string $resumeText, array $sections, array $parsedExp, array $matrix): array {
+    $scores = [];
+    $roleToField = [];
+    
+    foreach ($matrix as $field => $roles) {
+        foreach ($roles as $role) {
+            $scores[$role] = 0;
+            $roleToField[$role] = $field;
+        }
+    }
+    
+    $lines = explode("\n", $resumeText);
+    $headerText = '';
+    for ($i = 0; $i < min(8, count($lines)); $i++) {
+        $headerText .= ' ' . $lines[$i];
+    }
+    
+    $summaryText = $sections['summary'] ?? '';
+    
+    $expRoles = [];
+    foreach ($parsedExp as $job) {
+        if (!empty($job['role'])) {
+            $expRoles[] = $job['role'];
+        }
+    }
+    
+    foreach ($scores as $role => $score) {
+        $escapedRole = preg_quote($role, '/');
+        $pattern = '/(?<![a-zA-Z0-9])' . $escapedRole . '(?![a-zA-Z0-9])/i';
+        
+        foreach ($expRoles as $expRole) {
+            if (preg_match($pattern, $expRole)) {
+                $scores[$role] += 15;
+            }
+        }
+        
+        if (preg_match($pattern, $headerText)) {
+            $scores[$role] += 10;
+        }
+        
+        if (!empty($summaryText) && preg_match($pattern, $summaryText)) {
+            $scores[$role] += 8;
+        }
+        
+        if (preg_match_all($pattern, $resumeText, $matches)) {
+            $scores[$role] += count($matches[0]) * 2;
+        }
+    }
+    
+    arsort($scores);
+    $bestRole = key($scores);
+    $bestScore = current($scores);
+    
+    if ($bestScore === 0) {
+        $bestRole = 'Software Engineer';
+        $bestField = 'Technology & Engineering';
+    } else {
+        $bestField = $roleToField[$bestRole];
+    }
+    
+    return [
+        'role' => $bestRole,
+        'field' => $bestField
+    ];
+}
+
+$fieldIcons = [
+    'Administrative' => '💼',
+    'Business Operations, HR & Executive' => '👔',
+    'Construction, Manufacturing & Trades' => '🛠️',
+    'Customer Service & Hospitality' => '🛎️',
+    'Education' => '🎓',
+    'Finance & Accounting' => '💵',
+    'Government, Legal & Public Safety' => '⚖️',
+    'Healthcare & Personal Care' => '🏥',
+    'Marketing, Media & Design' => '🎨',
+    'Retail, Sales & Real Estate' => '🛍️',
+    'Technology & Engineering' => '⚙️',
+    'Transportation & Logistics' => '🚚'
+];
+
+$fieldMatrices = [
+    'Administrative' => [
+        'core' => ['office suite', 'ms office', 'excel', 'word', 'calendar', 'scheduling', 'billing', 'data entry'],
+        'supporting' => ['customer service', 'organization', 'filing', 'bookkeeping', 'phone', 'reception', 'meetings']
+    ],
+    'Business Operations, HR & Executive' => [
+        'core' => ['operations', 'project management', 'agile', 'hris', 'payroll', 'budgeting', 'recruitment', 'onboarding'],
+        'supporting' => ['leadership', 'strategy', 'process improvement', 'scrum', 'jira', 'policy', 'analytics']
+    ],
+    'Construction, Manufacturing & Trades' => [
+        'core' => ['osha', 'safety', 'blueprints', 'maintenance', 'troubleshooting', 'welding', 'hvac', 'cad'],
+        'supporting' => ['quality assurance', 'inspections', 'hand tools', 'repairs', 'inventory', 'machinery']
+    ],
+    'Customer Service & Hospitality' => [
+        'core' => ['pos', 'crm', 'ticketing', 'billing', 'reservations', 'cashier', 'phone support', 'escalations'],
+        'supporting' => ['communication', 'problem solving', 'multitasking', 'hospitality', 'satisfaction', 'inquiries']
+    ],
+    'Education' => [
+        'core' => ['curriculum', 'lesson plan', 'assessment', 'classroom management', 'iep', 'tutoring', 'pedagogy'],
+        'supporting' => ['mentoring', 'communication', 'instruction', 'grading', 'collaboration', 'e-learning']
+    ],
+    'Finance & Accounting' => [
+        'core' => ['gaap', 'quickbooks', 'general ledger', 'auditing', 'tax preparation', 'reconciliation', 'financial statements', 'excel'],
+        'supporting' => ['cpa', 'forecasting', 'accounts payable', 'accounts receivable', 'compliance', 'ledger', 'sap']
+    ],
+    'Government, Legal & Public Safety' => [
+        'core' => ['litigation', 'legal research', 'compliance', 'security', 'investigation', 'contract', 'policy', 'documentation'],
+        'supporting' => ['writing', 'confidentiality', 'reporting', 'patrol', 'emergency', 'regulation', 'risk']
+    ],
+    'Healthcare & Personal Care' => [
+        'core' => ['hipaa', 'ehr', 'emr', 'patient care', 'cpr', 'bls', 'clinical', 'medical terminology'],
+        'supporting' => ['medication', 'vital signs', 'triage', 'assessment', 'nursing', 'therapy', 'hygiene']
+    ],
+    'Marketing, Media & Design' => [
+        'core' => ['seo', 'sem', 'google analytics', 'social media', 'content strategy', 'adobe', 'photoshop', 'illustrator'],
+        'supporting' => ['branding', 'email marketing', 'copywriting', 'graphic design', 'campaigns', 'marketing automation']
+    ],
+    'Retail, Sales & Real Estate' => [
+        'core' => ['crm', 'salesforce', 'lead generation', 'cold calling', 'negotiation', 'pipeline', 'retail', 'leasing'],
+        'supporting' => ['relationship building', 'closing', 'prospecting', 'customer relationship', 'account management', 'presentations']
+    ],
+    'Technology & Engineering' => [
+        'core' => ['software', 'programming', 'sql', 'git', 'database', 'cloud', 'architecture', 'api', 'agile'],
+        'supporting' => ['debugging', 'testing', 'linux', 'bash', 'cicd', 'microservices', 'scrum']
+    ],
+    'Transportation & Logistics' => [
+        'core' => ['inventory', 'shipping', 'receiving', 'wms', 'forklift', 'cdl', 'logistics', 'dispatch'],
+        'supporting' => ['safety', 'routing', 'manifest', 'tracking', 'supply chain', 'warehouse']
+    ]
+];
+
+$roleMatrices = [
+    'Java Developer' => [
+        'core' => ['java', 'spring', 'spring boot', 'hibernate', 'maven', 'gradle', 'junit', 'jpa', 'jdbc', 'multithreading', 'concurrency'],
+        'supporting' => ['sql', 'rest', 'api', 'git', 'docker', 'microservices', 'tomcat', 'databases', 'web technologies', 'testing', 'scrum', 'agile', 'backbone', 'security']
+    ],
+    'Senior Engineer' => [
+        'core' => ['engineering', 'design', 'python', 'java', 'javascript', 'software', 'programming', 'architecture', 'development'],
+        'supporting' => ['cad', 'inspection', 'safety', 'project management', 'agile', 'git', 'testing', 'debugging', 'osha']
+    ],
+    'Android Developer' => [
+        'core' => ['android', 'kotlin', 'java', 'sdk', 'gradle', 'retrofit', 'jetpack compose', 'android studio'],
+        'supporting' => ['git', 'api', 'xml', 'mvvm', 'sqlite', 'rxjava', 'coroutine', 'testing']
+    ],
+    'IOS Developer' => [
+        'core' => ['ios', 'swift', 'objective-c', 'xcode', 'cocoapods', 'swiftui', 'core data', 'combine'],
+        'supporting' => ['git', 'api', 'mvvm', 'core data', 'testing', 'jenkins', 'testflight']
+    ],
+    'DevOps Engineer' => [
+        'core' => ['devops', 'terraform', 'kubernetes', 'docker', 'jenkins', 'ci/cd', 'aws', 'gcp', 'azure', 'pipelines'],
+        'supporting' => ['linux', 'bash', 'ansible', 'git', 'nginx', 'helm', 'prometheus', 'grafana', 'vault']
+    ],
+    'Front End Developer' => [
+        'core' => ['react', 'javascript', 'typescript', 'next\.js', 'vue', 'angular', 'svelte', 'webpack', 'html', 'css'],
+        'supporting' => ['tailwind', 'css', 'sass', 'figma', 'html', 'frontend', 'ui', 'ux', 'git']
+    ],
+    'Data Scientist' => [
+        'core' => ['python', 'pandas', 'numpy', 'spark', 'airflow', 'bigquery', 'tensorflow', 'machine learning', 'pytorch', 'scikit-learn'],
+        'supporting' => ['sql', 'etl', 'tableau', 'statistics', 'regression', 'nlp', 'r', 'data visualization']
+    ],
+    'Data Analyst' => [
+        'core' => ['sql', 'excel', 'tableau', 'power bi', 'python', 'pandas', 'data visualization', 'reporting'],
+        'supporting' => ['cleaning', 'etl', 'statistics', 'dashboards', 'analytical', 'queries']
+    ],
+    'Civil Engineer' => [
+        'core' => ['cad', 'autocad', 'civil 3d', 'structural', 'infrastructure', 'gis', 'construction management'],
+        'supporting' => ['inspections', 'safety', 'excel', 'project management', 'permits', 'design']
+    ]
+];
+
 
 /**
  * Pure-PHP UTF-8 encoder — converts a Unicode codepoint to a UTF-8 string.
@@ -568,7 +828,7 @@ function parseCulture(string $cultureText): array {
 function highlightKeywords(string $text, array $keywords): string {
     $escapedText = htmlspecialchars($text);
     foreach ($keywords as $keyword) {
-        $pattern = '/(?<![a-zA-Z0-9])(' . $keyword . ')(?![a-zA-Z0-9])/i';
+        $pattern = '/(?<![a-zA-Z0-9])(' . preg_quote($keyword, '/') . ')(?![a-zA-Z0-9])/i';
         $escapedText = preg_replace($pattern, '<strong>$1</strong>', $escapedText);
     }
     return $escapedText;
@@ -680,7 +940,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // B. Calculate general PILLAR 2: Tenure
+        // B. Parse sections and details
+        $sections = getResumeSections($resumeText);
+        $parsedEdu = isset($sections['education']) ? parseEducation($sections['education']) : [];
+        $parsedExp = isset($sections['experience']) ? parseExperience($sections['experience']) : [];
+        $parsedProj = isset($sections['projects']) ? parseProjects($sections['projects']) : [];
+        $parsedCert = isset($sections['certifications']) ? parseCertifications($sections['certifications']) : [];
+        $parsedSkills = isset($sections['skills']) ? parseSkills($sections['skills']) : [];
+        $parsedCulture = isset($sections['culture']) ? parseCulture($sections['culture']) : [];
+
+        // C. Calculate general PILLAR 2: Tenure
         $tenureYears = estimateTenure($resumeText);
         if ($tenureYears >= 6) {
             $pillar2Score = 30;
@@ -690,7 +959,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pillar2Score = 10;
         }
 
-        // C. Calculate general PILLAR 3: Quantifiable Impact
+        // D. Calculate general PILLAR 3: Quantifiable Impact
         $actionVerbs = ['led','built','optimized','implemented','designed','developed','increased','decreased','reduced','launched','architected','migrated','automated','scaled','shipped','deployed','refactored','mentored','created','delivered'];
         foreach ($lines as $line) {
             $line = trim($line);
@@ -710,44 +979,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $pillar3Score = count($extractedMetrics) * 5;
 
-        // D. Calculate PILLAR 1 (Skill Match) per archetype and sum total scores
-        $archetypes = [
-            'Frontend' => [
-                'core' => ['react', 'javascript', 'typescript', 'next\.js', 'vue', 'angular', 'svelte', 'webpack'],
-                'supporting' => ['tailwind', 'css', 'sass', 'figma', 'html', 'frontend', 'ui', 'ux']
-            ],
-            'Backend'  => [
-                'core' => ['java', 'golang', 'rust', 'node', 'express', 'graphql', 'grpc', 'go', 'microservices'],
-                'supporting' => ['rest', 'api', 'sql', 'postgresql', 'redis', 'kafka', 'backend', 'c\+\+', 'git']
-            ],
-            'Data'     => [
-                'core' => ['python', 'pandas', 'numpy', 'spark', 'airflow', 'bigquery', 'tensorflow', 'machine learning'],
-                'supporting' => ['sql', 'etl', 'tableau', 'data scientist', 'dbt', 'statistics', 'regression', 'nlp', 'r']
-            ],
-            'DevOps'   => [
-                'core' => ['devops', 'terraform', 'jenkins', 'kubernetes', 'docker', 'aws', 'gcp', 'azure', 'ci\/cd', 'pipeline', 'pipelines'],
-                'supporting' => ['ansible', 'bash', 'sre', 'linux', 'helm', 'prometheus', 'grafana', 'cloudformation', 'chef', 'puppet', 'vault', 'packer', 'github actions', 'gitlab ci', 'circleci', 'argocd', 'spinnaker', 'nginx', 'haproxy', 'infrastructure as code', 'observability', 'on-call']
-            ],
-        ];
+        // E. Load dynamic roles and detect targeted role/field
+        $rolesData = loadRolesMatrix();
+        $rolesMatrix = $rolesData['matrix'] ?? [];
+        $descriptions = $rolesData['descriptions'] ?? [];
 
-        $archetypeDetails = [];
+        $det = detectJobRoleAndField($resumeText, $sections, $parsedExp, $rolesMatrix);
+        $identifiedRole = $det['role'];
+        $identifiedField = $det['field'];
 
-        foreach ($archetypes as $type => $categories) {
+        // Build skill search text to exclude company names and date ranges
+        $skillSearchText = getSkillSearchText($resumeText, $sections, $parsedExp);
+
+        // F. Calculate scoring for all 12 fields using appropriate keywords
+        $fieldScores = [];
+        $fieldDetails = [];
+
+        foreach ($fieldMatrices as $field => $fieldKws) {
+            $activeKws = $fieldKws;
+            if ($field === $identifiedField && isset($roleMatrices[$identifiedRole])) {
+                $activeKws = $roleMatrices[$identifiedRole];
+            }
+
             $coreMatched = 0;
             $supportingMatched = 0;
             $p1 = 0;
 
-            foreach ($categories['core'] as $keyword) {
-                $pattern = '/(?<![a-zA-Z0-9])' . $keyword . '(?![a-zA-Z0-9])/i';
-                if (preg_match($pattern, $resumeText)) {
+            foreach ($activeKws['core'] as $keyword) {
+                $pattern = '/(?<![a-zA-Z0-9])' . preg_quote($keyword, '/') . '(?![a-zA-Z0-9])/i';
+                if (preg_match($pattern, $skillSearchText)) {
                     $coreMatched++;
                     $p1 += 3;
                 }
             }
 
-            foreach ($categories['supporting'] as $keyword) {
-                $pattern = '/(?<![a-zA-Z0-9])' . $keyword . '(?![a-zA-Z0-9])/i';
-                if (preg_match($pattern, $resumeText)) {
+            foreach ($activeKws['supporting'] as $keyword) {
+                $pattern = '/(?<![a-zA-Z0-9])' . preg_quote($keyword, '/') . '(?![a-zA-Z0-9])/i';
+                if (preg_match($pattern, $skillSearchText)) {
                     $supportingMatched++;
                     $p1 += 1;
                 }
@@ -756,77 +1024,83 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $p1Cap = min($p1, 50);
             $totalScore = $p1Cap + $pillar2Score + $pillar3Score;
 
-            $scores[$type] = $totalScore;
-
-            $archetypeDetails[$type] = [
+            $fieldScores[$field] = $totalScore;
+            $fieldDetails[$field] = [
                 'core_count' => $coreMatched,
                 'supporting_count' => $supportingMatched,
                 'p1_score' => $p1Cap,
+                'keywords' => $activeKws
             ];
         }
 
-        // Sort descending to find primary archetype
+        // Set top level scores (sorted descending)
+        $scores = $fieldScores;
         arsort($scores);
-        $identifiedArchetype = key($scores);
-        $atsScore = $scores[$identifiedArchetype];
+
+        $identifiedArchetype = $identifiedField;
+        $atsScore = $scores[$identifiedField];
 
         // Winning details for display
-        $matchedCoreCount = $archetypeDetails[$identifiedArchetype]['core_count'];
-        $matchedSupportingCount = $archetypeDetails[$identifiedArchetype]['supporting_count'];
-        $winningPillar1 = $archetypeDetails[$identifiedArchetype]['p1_score'];
+        $winningKws = $fieldDetails[$identifiedField]['keywords'];
+        $matchedCoreCount = $fieldDetails[$identifiedField]['core_count'];
+        $matchedSupportingCount = $fieldDetails[$identifiedField]['supporting_count'];
+        $winningPillar1 = $fieldDetails[$identifiedField]['p1_score'];
         $winningPillar2 = $pillar2Score;
         $winningPillar3 = $pillar3Score;
 
-        $archetypeMap = [
-            'Frontend' => '🎨 Frontend / Product Engineer',
-            'Backend'  => '⚙️ Backend / Systems Engineer',
-            'Data'     => '📊 Data / Analytics Engineer',
-            'DevOps'   => '🚀 DevOps / SRE Cloud Engineer',
-        ];
-        $archetypeEmoji = $archetypeMap[$identifiedArchetype] ?? '🤔 Generalist';
-
-        // E. Company profile parsing and structure extraction
-        $sections = getResumeSections($resumeText);
-        $parsedEdu = isset($sections['education']) ? parseEducation($sections['education']) : [];
-        $parsedExp = isset($sections['experience']) ? parseExperience($sections['experience']) : [];
-        $parsedProj = isset($sections['projects']) ? parseProjects($sections['projects']) : [];
-        $parsedCert = isset($sections['certifications']) ? parseCertifications($sections['certifications']) : [];
-        $parsedSkills = isset($sections['skills']) ? parseSkills($sections['skills']) : [];
-        $parsedCulture = isset($sections['culture']) ? parseCulture($sections['culture']) : [];
+        $archetypeEmoji = ($fieldIcons[$identifiedField] ?? '🤔') . ' ' . $identifiedRole;
 
         $winningKeywords = array_merge(
-            $archetypes[$identifiedArchetype]['core'],
-            $archetypes[$identifiedArchetype]['supporting']
+            $winningKws['core'],
+            $winningKws['supporting']
         );
 
-        // F. Collect matched lines for rubric dropdowns
+        // G. Collect matched lines for rubric dropdowns using the filtered skillSearchText
         $textLines = explode("\n", $resumeText);
         $pillar1Details = ['core' => [], 'supporting' => []];
 
-        foreach ($archetypes[$identifiedArchetype]['core'] as $keyword) {
-            $pattern = '/(?<![a-zA-Z0-9])' . $keyword . '(?![a-zA-Z0-9])/i';
+        foreach ($winningKws['core'] as $keyword) {
+            $pattern = '/(?<![a-zA-Z0-9])' . preg_quote($keyword, '/') . '(?![a-zA-Z0-9])/i';
             $matchingLines = [];
-            if (preg_match($pattern, $resumeText)) {
+            if (preg_match($pattern, $skillSearchText)) {
                 foreach ($textLines as $line) {
                     $trimmedLine = trim($line);
                     if (!empty($trimmedLine) && preg_match($pattern, $trimmedLine)) {
-                        $matchingLines[] = $trimmedLine;
-                        if (count($matchingLines) >= 2) break; // Limit to 2 lines
+                        $isCompanyLine = false;
+                        foreach ($parsedExp as $job) {
+                            if (!empty($job['company']) && strpos($trimmedLine, $job['company']) !== false) {
+                                $isCompanyLine = true;
+                                break;
+                            }
+                        }
+                        if (!$isCompanyLine) {
+                            $matchingLines[] = $trimmedLine;
+                            if (count($matchingLines) >= 2) break;
+                        }
                     }
                 }
             }
             $pillar1Details['core'][$keyword] = $matchingLines;
         }
 
-        foreach ($archetypes[$identifiedArchetype]['supporting'] as $keyword) {
-            $pattern = '/(?<![a-zA-Z0-9])' . $keyword . '(?![a-zA-Z0-9])/i';
+        foreach ($winningKws['supporting'] as $keyword) {
+            $pattern = '/(?<![a-zA-Z0-9])' . preg_quote($keyword, '/') . '(?![a-zA-Z0-9])/i';
             $matchingLines = [];
-            if (preg_match($pattern, $resumeText)) {
+            if (preg_match($pattern, $skillSearchText)) {
                 foreach ($textLines as $line) {
                     $trimmedLine = trim($line);
                     if (!empty($trimmedLine) && preg_match($pattern, $trimmedLine)) {
-                        $matchingLines[] = $trimmedLine;
-                        if (count($matchingLines) >= 2) break;
+                        $isCompanyLine = false;
+                        foreach ($parsedExp as $job) {
+                            if (!empty($job['company']) && strpos($trimmedLine, $job['company']) !== false) {
+                                $isCompanyLine = true;
+                                break;
+                            }
+                        }
+                        if (!$isCompanyLine) {
+                            $matchingLines[] = $trimmedLine;
+                            if (count($matchingLines) >= 2) break;
+                        }
                     }
                 }
             }
@@ -1615,15 +1889,16 @@ $scoreLabel = get_score_label($atsScore);
         <div class="divider"></div>
 
         <!-- Archetype Comparison bars -->
-        <div class="section-label">Archetype Signal Breakdown</div>
+        <div class="section-label">Industry Match Signal Breakdown (Top 4 Fields)</div>
         <?php
-            $archetypeIcons = ['Frontend' => '🎨', 'Backend' => '⚙️', 'Data' => '📊', 'DevOps' => '🚀'];
-
-            foreach ($scores as $arcType => $arcScore):
+            $displayScores = array_slice($scores, 0, 4);
+            foreach ($displayScores as $arcType => $arcScore):
                 $isWinner = ($arcType === $identifiedArchetype);
         ?>
         <div class="archetype-row">
-            <div class="arch-name"><?php echo $archetypeIcons[$arcType] ?? ''; ?> <?php echo $arcType; ?></div>
+            <div class="arch-name" style="width: 200px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="<?php echo htmlspecialchars($arcType); ?>">
+                <?php echo $fieldIcons[$arcType] ?? '🤔'; ?> <?php echo htmlspecialchars($arcType); ?>
+            </div>
             <div class="arch-bar-track">
                 <div class="arch-bar-fill <?php echo $isWinner ? 'winner' : ''; ?>" style="width:<?php echo $arcScore; ?>%"></div>
             </div>

@@ -2,3 +2,6 @@ poppler/
 *.pdf
 test_debug.php
 test_regex.php
+test_sofia.php
+test_cody.php
+test_tenure.php

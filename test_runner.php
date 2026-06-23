@@ -32,9 +32,9 @@ foreach ($scores as $type => $score) {
     echo "  - $type: $score" . PHP_EOL;
 }
 echo "------------------------------------------------" . PHP_EOL;
-if ($identifiedArchetype === 'DevOps' && $name === 'MALIK RABB') {
-    echo "SUCCESS: Candidate Malik Rabb correctly classified as DevOps!" . PHP_EOL;
+if ($identifiedArchetype === 'Technology & Engineering' && $identifiedRole === 'DevOps Engineer' && $name === 'MALIK RABB') {
+    echo "SUCCESS: Candidate Malik Rabb correctly classified as DevOps Engineer!" . PHP_EOL;
 } else {
-    echo "FAILURE: Candidate name or archetype classification mismatch." . PHP_EOL;
+    echo "FAILURE: Candidate name, field, or role classification mismatch." . PHP_EOL;
 }
 echo "------------------------------------------------" . PHP_EOL;
