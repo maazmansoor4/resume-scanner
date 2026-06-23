@@ -92,7 +92,6 @@ function loadRolesMatrix(): array {
                 'HR Generalist',
                 'HR Manager',
                 'HR Specialist',
-                'Intern',
                 'Manager',
                 'Manager Assistant',
                 'Operations Associate',
@@ -981,7 +980,7 @@ function estimateTenure(string $text): int {
 /**
  * Calculate career longevity/tenure from date ranges of relevant jobs.
  */
-function calculateTenureFromJobs(array $jobs, array $combinedKws, int $currentYear): int {
+function calculateTenureFromJobs(array $jobs, array $combinedKws, int $currentYear, string $field = ''): int {
     $yearsActive = [];
     $monthsPattern = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|\d{1,2})';
     $rangePattern = '#(?:' . $monthsPattern . '[\s\/-]+)?\b(19\d\d|20[0-4]\d)\s*(?:-|–|—|\/|to)\s*(?:' . $monthsPattern . '[\s\/-]+)?\b(20[0-4]\d|Present|Current|Now)\b#ui';
@@ -1002,6 +1001,31 @@ function calculateTenureFromJobs(array $jobs, array $combinedKws, int $currentYe
                 if (preg_match($pattern, $combinedText)) {
                     $isRelevant = true;
                     break;
+                }
+            }
+            if (!$isRelevant && !empty($field)) {
+                $f = strtolower($field);
+                $generalKws = [];
+                if (strpos($f, 'business') !== false || strpos($f, 'admin') !== false || strpos($f, 'finance') !== false || strpos($f, 'sales') !== false || strpos($f, 'retail') !== false) {
+                    $generalKws = ['business', 'admin', 'manage', 'finance', 'account', 'mba', 'economics', 'hr', 'human resource', 'marketing', 'sales', 'commerce', 'intern', 'consultant'];
+                } elseif (strpos($f, 'technology') !== false || strpos($f, 'engineering') !== false) {
+                    $generalKws = ['computer', 'software', 'technology', 'system', 'it', 'engineering', 'science', 'developer', 'prog', 'data', 'network', 'web', 'cyber', 'information', 'intern', 'consultant'];
+                } elseif (strpos($f, 'construction') !== false || strpos($f, 'manufacturing') !== false) {
+                    $generalKws = ['construction', 'machin', 'hvac', 'weld', 'automotive', 'architect', 'civil', 'engineer', 'trade', 'safety', 'intern'];
+                } elseif (strpos($f, 'health') !== false) {
+                    $generalKws = ['nurs', 'medic', 'health', 'clinic', 'dent', 'pharm', 'therapy', 'biolog', 'vet', 'intern'];
+                } elseif (strpos($f, 'education') !== false) {
+                    $generalKws = ['education', 'teach', 'pedagogy', 'instruction', 'curriculum', 'child', 'intern'];
+                } elseif (strpos($f, 'legal') !== false || strpos($f, 'government') !== false) {
+                    $generalKws = ['law', 'legal', 'crimin', 'justice', 'police', 'attorney', 'paralegal', 'safety', 'intern'];
+                }
+                
+                foreach ($generalKws as $kw) {
+                    $pattern = '/(?<![a-zA-Z0-9])' . preg_quote($kw, '/') . '(?![a-zA-Z0-9])/i';
+                    if (preg_match($pattern, $title . ' ' . $company)) {
+                        $isRelevant = true;
+                        break;
+                    }
                 }
             }
         }
@@ -1078,6 +1102,25 @@ function isMajorRelevant(string $course, string $field, string $role): bool {
 }
 
 /**
+ * Helper to parse month names to numbers.
+ */
+function parseMonth(string $text): int {
+    $months = [
+        'january' => 1, 'february' => 2, 'march' => 3, 'april' => 4, 'may' => 5, 'june' => 6,
+        'july' => 7, 'august' => 8, 'september' => 9, 'october' => 10, 'november' => 11, 'december' => 12,
+        'jan' => 1, 'feb' => 2, 'mar' => 3, 'apr' => 4, 'jun' => 6, 'jul' => 7, 'aug' => 8, 'sep' => 9,
+        'oct' => 10, 'nov' => 11, 'dec' => 12
+    ];
+    $textLower = strtolower(trim($text));
+    foreach ($months as $name => $num) {
+        if (strpos($textLower, $name) !== false) {
+            return $num;
+        }
+    }
+    return 6; // Default to June if not specified
+}
+
+/**
  * Calculate the detailed Education & Certifications Score (Pillar 3).
  * Returns array with score, audit logs/reasons, fresh-grad status, and highest graduation year.
  */
@@ -1086,7 +1129,9 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
     $isFreshEdu = false;
     $freshYear = 0;
     $currentYear = (int)date('Y');
+    $currentMonth = (int)date('n');
     $highestGradYear = 0;
+    $highestGradMonth = 6;
     $hasPhDEnrolled = false;
     $hasUndergradEnrolled = false;
 
@@ -1120,6 +1165,7 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
 
         // Try to find any year in the university or course line or details (preserved lines)
         $gradYear = null;
+        $gradMonth = 6;
         $eduDetailsText = $course . ' ' . $uni . ' ' . (isset($edu['details']) ? implode(' ', $edu['details']) : '');
         if (preg_match_all('/\b(19\d\d|20[0-4]\d)\b/', $eduDetailsText, $ym)) {
             $yearsFound = array_map('intval', $ym[1]);
@@ -1141,29 +1187,38 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
                 }
             }
 
+            // Extract month if present near the graduation year
+            if (preg_match('/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i', $eduDetailsText, $mm)) {
+                $gradMonth = parseMonth($mm[1]);
+            }
+
             if ($gradYear <= $currentYear) {
                 $allYears[] = $gradYear;
             }
             if ($gradYear > $highestGradYear) {
                 $highestGradYear = $gradYear;
+                $highestGradMonth = $gradMonth;
+            } elseif ($gradYear === $highestGradYear && $gradMonth > $highestGradMonth) {
+                $highestGradMonth = $gradMonth;
             }
         }
 
         $cLower = strtolower($course);
-        $isFuture = ($gradYear !== null && $gradYear >= $currentYear);
+        $isFuture = ($gradYear !== null && ($gradYear > $currentYear || ($gradYear === $currentYear && $gradMonth >= $currentMonth)));
 
         if (preg_match('/\b(ph\.?d|doctor|doctorate)\b/i', $cLower)) {
             if ($isFuture) {
                 $hasPhDEnrolled = true;
+            } else {
+                $phds[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu, 'gradYear' => $gradYear, 'gradMonth' => $gradMonth];
             }
-            $phds[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu, 'gradYear' => $gradYear];
         } elseif (preg_match('/\b(masters?|m\.s\.|m\.a\.|m\.sc\.|mba)\b/i', $cLower)) {
-            $masters[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu, 'gradYear' => $gradYear];
+            $masters[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu, 'gradYear' => $gradYear, 'gradMonth' => $gradMonth];
         } elseif (preg_match('/\b(bachelors?|b\.s\.|b\.a\.|b\.sc\.|b\.e\.|b\.tech)\b/i', $cLower)) {
             if ($isFuture) {
                 $hasUndergradEnrolled = true;
             }
-            $bachelors[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu, 'gradYear' => $gradYear];
+            $bachelors[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu, 'gradYear' => $gradYear, 'gradMonth' => $gradMonth];
         }
     }
 
@@ -1184,8 +1239,9 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
     $isUndergradIntern = false;
 
     // Check if employee is Intern level based on role match or ongoing university enrollment
+    $isInternOrStudentFuture = ($highestGradYear > $currentYear || ($highestGradYear === $currentYear && $highestGradMonth >= $currentMonth));
     $isInternRole = (bool)preg_match('/\b(intern|assistant|co-op|trainee|apprentice|student|clerk)\b/i', $role)
-        || ($highestGradYear >= $currentYear)
+        || $isInternOrStudentFuture
         || $hasUndergradEnrolled;
 
     if (!empty($phds)) {
@@ -1272,17 +1328,21 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
 
             $bachIsRelevant = isMajorRelevant($bach['course'], $field, $role);
             $bachScore = 0;
+            $bachGradYear = $bach['gradYear'];
+            $bachGradMonth = $bach['gradMonth'] ?? 6;
+            $bachIsFuture = ($bachGradYear !== null && ($bachGradYear > $currentYear || ($bachGradYear === $currentYear && $bachGradMonth >= $currentMonth)));
 
             // Undergrad Intern Rule: relevant major, intern-level role
-            if ($bachIsRelevant && $isInternRole && $highestGradYear >= $currentYear) {
-                $yearsToGrad = $highestGradYear - $currentYear;
+            if ($bachIsRelevant && $isInternRole && $bachIsFuture) {
+                $monthsToGrad = ($bachGradYear - $currentYear) * 12 + ($bachGradMonth - $currentMonth);
+                $yearsToGrad = $monthsToGrad / 12.0;
                 $gpaVal = $bachGpa ?? 2.5;
 
                 // Max possible points for 4.0 GPA:
                 // Over 3 years: 15. Over 2 years and under 3: 20. Less than 2 years: 30.
-                if ($yearsToGrad > 3) {
+                if ($yearsToGrad > 3.0) {
                     $maxGpaPoints = 15;
-                } elseif ($yearsToGrad >= 2 && $yearsToGrad <= 3) {
+                } elseif ($yearsToGrad >= 2.0 && $yearsToGrad <= 3.0) {
                     $maxGpaPoints = 20;
                 } else {
                     $maxGpaPoints = 30;
@@ -1315,22 +1375,26 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
             $bestBach = $selectedBach;
             $gpa = $bestBach['gpa'];
             $isRelevant = isMajorRelevant($bestBach['course'], $field, $role);
+            $bestBachGradYear = $bestBach['gradYear'];
+            $bestBachGradMonth = $bestBach['gradMonth'] ?? 6;
+            $bestBachIsFuture = ($bestBachGradYear !== null && ($bestBachGradYear > $currentYear || ($bestBachGradYear === $currentYear && $bestBachGradMonth >= $currentMonth)));
 
             // Re-run for audit log generation and final baseScore setting
-            if ($isRelevant && $isInternRole && $highestGradYear >= $currentYear) {
+            if ($isRelevant && $isInternRole && $bestBachIsFuture) {
                 $isUndergradIntern = true;
-                $yearsToGrad = $highestGradYear - $currentYear;
+                $monthsToGrad = ($bestBachGradYear - $currentYear) * 12 + ($bestBachGradMonth - $currentMonth);
+                $yearsToGrad = $monthsToGrad / 12.0;
                 $gpaVal = $gpa ?? 2.5;
 
-                if ($yearsToGrad > 3) {
+                if ($yearsToGrad > 3.0) {
                     $maxGpaPoints = 15;
-                    $audit[] = "Undergrad Intern Rule: relevant major (" . $bestBach['course'] . "), graduation > 3 years ($highestGradYear). Max GPA points: 15.";
-                } elseif ($yearsToGrad >= 2 && $yearsToGrad <= 3) {
+                    $audit[] = "Undergrad Intern Rule: relevant major (" . $bestBach['course'] . "), graduation > 3 years (" . $bestBachGradMonth . "/" . $bestBachGradYear . "). Max GPA points: 15.";
+                } elseif ($yearsToGrad >= 2.0 && $yearsToGrad <= 3.0) {
                     $maxGpaPoints = 20;
-                    $audit[] = "Undergrad Intern Rule: relevant major (" . $bestBach['course'] . "), graduation 2-3 years ($highestGradYear). Max GPA points: 20.";
+                    $audit[] = "Undergrad Intern Rule: relevant major (" . $bestBach['course'] . "), graduation 2-3 years (" . $bestBachGradMonth . "/" . $bestBachGradYear . "). Max GPA points: 20.";
                 } else {
                     $maxGpaPoints = 30;
-                    $audit[] = "Undergrad Intern Rule: relevant major (" . $bestBach['course'] . "), graduation < 2 years ($highestGradYear). Max GPA points: 30.";
+                    $audit[] = "Undergrad Intern Rule: relevant major (" . $bestBach['course'] . "), graduation < 2 years (" . $bestBachGradMonth . "/" . $bestBachGradYear . "). Max GPA points: 30.";
                 }
 
                 $gpaBounded = max(2.1, min(3.5, $gpaVal));
@@ -1475,7 +1539,12 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
 function getResumeSections(string $text): array {
     $headings = [
         'summary'        => ['/^(?:PROFESSIONAL\s+)?SUMMARY\b/im', '/^ABOUT\s+ME\b/im', '/^OBJECTIVE\b/im'],
-        'experience'     => ['/^(?:WORK\s+|PROFESSIONAL\s+|EMPLOYMENT\s+)?EXPERIENCE\b/im', '/^WORK\s+HISTORY\b/im', '/^CAREER\s+HISTORY\b/im'],
+        'experience'     => [
+            '/^(?:WORK\s+|PROFESSIONAL\s+|EMPLOYMENT\s+|LEADERSHIP\s+|LEADERSHIP\s+&\s+)?EXPERIENCE\b/im',
+            '/^WORK\s+HISTORY\b/im',
+            '/^CAREER\s+HISTORY\b/im',
+            '/^LEADERSHIP(?:\s+(?:&|and)\s+ACTIVITIES)?\b/im'
+        ],
         'education'      => ['/^(?:PROFESSIONAL\s+|ACADEMIC\s+)?EDUCATION\b/im', '/^ACADEMIC\s+BACKGROUND\b/im'],
         'projects'       => ['/^(?:.*?\s+)?PROJECTS\b/im'],
         'certifications' => ['/^(?:.*?\s+)?CERTIFICATIONS\b/im', '/^CREDENTIALS\b/im', '/^LICENSES\b/im'],
@@ -1634,50 +1703,79 @@ function parseExperience(string $expText): array {
     $jobs = [];
     $currentJob = null;
     $monthsPattern = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|\d{1,2})';
-    $rangePattern = '#(?:' . $monthsPattern . '[\s\/-]+)?\b(19\d\d|20[0-2]\d)\s*(?:-|–|—|\/|to)\s*(?:' . $monthsPattern . '[\s\/-]+)?\b(20[0-2]\d|Present|Current|Now)\b#ui';
+    $rangePattern = '#(?:' . $monthsPattern . '[\s\/-]+)?\b(19\d\d|20[0-4]\d)\s*(?:-|–|—|\/|to)\s*(?:' . $monthsPattern . '[\s\/-]+)?\b(20[0-4]\d|Present|Current|Now)\b#ui';
 
+    $cleanedLines = [];
     foreach ($lines as $line) {
         $trimmed = trim($line);
-        if (empty($trimmed)) continue;
+        if ($trimmed !== '') {
+            $cleanedLines[] = $trimmed;
+        }
+    }
 
-        $hasRange = preg_match($rangePattern, $trimmed, $m);
-        
+    $bulletPattern = '/^[\x{2022}\x{2023}\x{2043}\x{204B}\x{E000}-\x{F8FF}•\-*●▪◦■♦★]\s*(.*)/u';
+
+    for ($i = 0; $i < count($cleanedLines); $i++) {
+        $line = $cleanedLines[$i];
+        $hasRange = preg_match($rangePattern, $line, $m);
+
         if ($hasRange) {
             if ($currentJob) {
                 $jobs[] = $currentJob;
             }
             $dateRange = $m[0];
-            $roleInfo = trim(str_replace($dateRange, '', $trimmed));
+            $roleInfo = trim(str_replace($dateRange, '', $line));
             $roleInfo = trim($roleInfo, " \t\n\r\0\x0B|,-–—");
-            
+
+            // Look back to find the company name.
+            $company = '';
+            if ($i > 0) {
+                $prevLine = $cleanedLines[$i - 1];
+                $prevHasRange = preg_match($rangePattern, $prevLine);
+                $prevIsBullet = preg_match($bulletPattern, $prevLine);
+                if (!$prevHasRange && !$prevIsBullet) {
+                    $company = $prevLine;
+                }
+            }
+
             $currentJob = [
                 'role' => $roleInfo,
-                'company' => '',
+                'company' => $company,
                 'dates' => $dateRange,
                 'reference' => '',
                 'bullets' => []
             ];
         } else {
             if ($currentJob) {
-                $isBullet = preg_match('/^[\x{2022}\x{2023}\x{2043}\x{204B}•\-*]\s*(.*)/u', $trimmed, $bm);
+                $isBullet = preg_match($bulletPattern, $line, $bm);
                 if ($isBullet) {
                     $currentJob['bullets'][] = trim($bm[1]);
                 } else {
-                    if (empty($currentJob['company'])) {
-                        if (stripos($trimmed, 'reference') !== false || preg_match('/contact/i', $trimmed) || preg_match('/\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/', $trimmed)) {
-                            $currentJob['reference'] = $trimmed;
-                        } else {
-                            $currentJob['company'] = $trimmed;
-                        }
+                    if ($line === $currentJob['company']) {
+                        continue;
+                    }
+                    if (stripos($line, 'reference') !== false || preg_match('/contact/i', $line) || preg_match('/\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/', $line)) {
+                        $currentJob['reference'] = $line;
                     } else {
-                        if (stripos($trimmed, 'reference') !== false || preg_match('/contact/i', $trimmed) || preg_match('/\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/', $trimmed)) {
-                            $currentJob['reference'] = $trimmed;
+                        $isNextJobCompany = false;
+                        if ($i + 1 < count($cleanedLines)) {
+                            $nextLine = $cleanedLines[$i + 1];
+                            if (preg_match($rangePattern, $nextLine)) {
+                                $isNextJobCompany = true;
+                            }
+                        }
+                        if ($isNextJobCompany) {
+                            continue;
+                        }
+
+                        if (!empty($currentJob['bullets'])) {
+                            $idx = count($currentJob['bullets']) - 1;
+                            $currentJob['bullets'][$idx] .= ' ' . $line;
                         } else {
-                            if (!empty($currentJob['bullets'])) {
-                                $idx = count($currentJob['bullets']) - 1;
-                                $currentJob['bullets'][$idx] .= ' ' . $trimmed;
+                            if (empty($currentJob['company'])) {
+                                $currentJob['company'] = $line;
                             } else {
-                                $currentJob['company'] .= ' | ' . $trimmed;
+                                $currentJob['company'] .= ' | ' . $line;
                             }
                         }
                     }
@@ -1946,9 +2044,144 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $rolesMatrix = $rolesData['matrix'] ?? [];
         $descriptions = $rolesData['descriptions'] ?? [];
 
+        // Calculate highest graduation year, enrollment status, and chosen degree level beforehand
+        $highestGradYear = 0;
+        $highestGradMonth = 6;
+        $hasUndergradEnrolled = false;
+        $selectedDegree = null;
+        $highestDegreeScore = -1;
+        $currentMonth = (int)date('n');
+
+        foreach ($parsedEdu as $edu) {
+            $course = $edu['course'] ?? '';
+            $uni = $edu['university'] ?? '';
+            
+            $eduDetailsText = $course . ' ' . $uni . ' ' . (isset($edu['details']) ? implode(' ', $edu['details']) : '');
+            $gradYear = null;
+            $gradMonth = 6;
+            if (preg_match_all('/\b(19\d\d|20[0-4]\d)\b/', $eduDetailsText, $ym)) {
+                $yearsFound = array_map('intval', $ym[1]);
+                $minYear = min($yearsFound);
+                $maxYear = max($yearsFound);
+                if ($maxYear > $currentYear) {
+                    $gradYear = $maxYear;
+                } else {
+                    $isBach = preg_match('/\b(bachelors?|b\.s\.|b\.a\.|b\.sc\.|b\.e\.|b\.tech)\b/i', $course);
+                    if ($isBach && $minYear >= $currentYear - 4) {
+                        $gradYear = $minYear + 4;
+                    } else {
+                        $gradYear = $maxYear;
+                    }
+                }
+
+                if (preg_match('/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i', $eduDetailsText, $mm)) {
+                    $gradMonth = parseMonth($mm[1]);
+                }
+
+                if ($gradYear > $highestGradYear) {
+                    $highestGradYear = $gradYear;
+                    $highestGradMonth = $gradMonth;
+                } elseif ($gradYear === $highestGradYear && $gradMonth > $highestGradMonth) {
+                    $highestGradMonth = $gradMonth;
+                }
+            }
+
+            $cLower = strtolower($course);
+            $isFuture = ($gradYear !== null && ($gradYear > $currentYear || ($gradYear === $currentYear && $gradMonth >= $currentMonth)));
+            if (preg_match('/\b(bachelors?|b\.s\.|b\.a\.|b\.sc\.|b\.e\.|b\.tech)\b/i', $cLower)) {
+                if ($isFuture) {
+                    $hasUndergradEnrolled = true;
+                }
+            }
+
+            $isBach = preg_match('/\b(bachelors?|b\.s\.|b\.a\.|b\.sc\.|b\.e\.|b\.tech)\b/i', $cLower);
+            $isMast = preg_match('/\b(masters?|m\.s\.|m\.a\.|m\.sc\.|mba)\b/i', $cLower);
+            $isPhd = preg_match('/\b(ph\.?d|doctor|doctorate)\b/i', $cLower);
+            
+            $score = 0;
+            if ($isPhd) $score = 3;
+            elseif ($isMast) $score = 2;
+            elseif ($isBach) $score = 1;
+            
+            if ($score > $highestDegreeScore) {
+                $highestDegreeScore = $score;
+                $selectedDegree = $edu;
+            }
+        }
+
         $det = detectJobRoleAndField($resumeText, $sections, $parsedExp, $rolesMatrix);
         $identifiedRole = $det['role'];
         $identifiedField = $det['field'];
+
+        // Apply Intern/Student Override Logic
+        $isInternOrStudent = ($highestGradYear > $currentYear || ($highestGradYear === $currentYear && $highestGradMonth >= $currentMonth))
+            || $hasUndergradEnrolled
+            || (bool)preg_match('/\b(intern|assistant|co-op|trainee|apprentice|student|clerk)\b/i', $identifiedRole)
+            || ($identifiedRole === 'Intern');
+
+        if ($isInternOrStudent) {
+            $hasExpPriorToGrad = false;
+            if ($highestGradYear > 0 && !empty($parsedExp)) {
+                $hasExpPriorToGrad = true; // assume true and verify
+                foreach ($parsedExp as $job) {
+                    if (preg_match_all('/\b(20[0-2]\d)\b/', $job['dates'], $mym)) {
+                        foreach ($mym[1] as $y) {
+                            if ((int)$y >= $highestGradYear) {
+                                $hasExpPriorToGrad = false;
+                                break 2;
+                            }
+                        }
+                    }
+                }
+            } else {
+                $hasExpPriorToGrad = true;
+            }
+
+            if ($hasExpPriorToGrad) {
+                if ($selectedDegree !== null) {
+                    $course = $selectedDegree['course'] ?? '';
+                    $cLower = strtolower($course);
+                    
+                    if (preg_match('/\b(computer\s+science|software|programming|developer|ai|artificial\s+intelligence|net\s*centric|algorithmic|graphics|web|cyber|cybersecurity|information\s+technology)\b/i', $cLower)) {
+                        $identifiedRole = 'Software Engineer';
+                        $identifiedField = 'Technology & Engineering';
+                    } elseif (preg_match('/\b(economics?|finance|accounting|business|management|marketing)\b/i', $cLower)) {
+                        if (preg_match('/\b(computer|software|coding|cyber|web)\b/i', $cLower)) {
+                            $identifiedRole = 'Software Engineer';
+                            $identifiedField = 'Technology & Engineering';
+                        } else {
+                            if (preg_match('/\b(accounting|accountant)\b/i', $cLower)) {
+                                $identifiedRole = 'Accountant';
+                                $identifiedField = 'Finance & Accounting';
+                            } elseif (preg_match('/\b(finance|financial)\b/i', $cLower)) {
+                                $identifiedRole = 'Financial Analyst';
+                                $identifiedField = 'Finance & Accounting';
+                            } elseif (preg_match('/\b(business|management)\b/i', $cLower)) {
+                                $identifiedRole = 'Business Analyst';
+                                $identifiedField = 'Business Operations, HR & Executive';
+                            } else {
+                                $identifiedRole = 'Business Analyst';
+                                $identifiedField = 'Business Operations, HR & Executive';
+                            }
+                        }
+                    }
+                }
+            } else {
+                if ($identifiedRole === 'Intern' && !empty($parsedExp)) {
+                    $experienceText = '';
+                    foreach ($parsedExp as $job) {
+                        $experienceText .= ' ' . ($job['role'] ?? '') . ' ' . ($job['company'] ?? '');
+                    }
+                    if (preg_match('/\b(computer|software|programming|developer|web|cyber|it)\b/i', $experienceText)) {
+                        $identifiedRole = 'Software Engineer';
+                        $identifiedField = 'Technology & Engineering';
+                    } else {
+                        $identifiedRole = 'Business Analyst';
+                        $identifiedField = 'Business Operations, HR & Executive';
+                    }
+                }
+            }
+        }
 
         // Build skill search text to exclude company names and date ranges
         $skillSearchText = getSkillSearchText($resumeText, $sections, $parsedExp);
@@ -1973,7 +2206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $roleKwsList['core'],
                 $roleKwsList['supporting']
             ));
-            $tenureYearsField = calculateTenureFromJobs($parsedExp, $combinedKws, $currentYear);
+            $tenureYearsField = calculateTenureFromJobs($parsedExp, $combinedKws, $currentYear, $field);
 
             // Calculate Education & Certifications Score (Pillar 3)
             $eduResult = calculateEducationScore($parsedEdu, $parsedCert, $tenureYearsField, $field, $identifiedRole === $identifiedRole && $field === $identifiedField ? $identifiedRole : $field, $skillSearchText, $activeKws);
