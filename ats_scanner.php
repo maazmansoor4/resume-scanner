@@ -992,15 +992,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $parsedSkills = isset($sections['skills']) ? parseSkills($sections['skills']) : [];
         $parsedCulture = isset($sections['culture']) ? parseCulture($sections['culture']) : [];
 
-        // C. Calculate general PILLAR 2: Tenure
+        // C. Calculate general tenure years first (score is calculated dynamically per field)
         $tenureYears = estimateTenure($resumeText);
-        if ($tenureYears >= 6) {
-            $pillar2Score = 30;
-        } elseif ($tenureYears >= 3) {
-            $pillar2Score = 20;
-        } else {
-            $pillar2Score = 10;
-        }
 
         // D. Calculate general PILLAR 3: Quantifiable Impact
         $actionVerbs = ['led','built','optimized','implemented','designed','developed','increased','decreased','reduced','launched','architected','migrated','automated','scaled','shipped','deployed','refactored','mentored','created','delivered'];
@@ -1039,6 +1032,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fieldDetails = [];
 
         foreach ($fieldMatrices as $field => $fieldKws) {
+            $isTech = ($field === 'Technology & Engineering');
+            $p1MaxField = $isTech ? 50 : 30;
+            $p2MaxField = $isTech ? 30 : 50;
+
+            // Pillar 2 tenure score calculation for this field
+            if ($tenureYears >= 6) {
+                $p2ScoreField = $p2MaxField;
+            } elseif ($tenureYears >= 3) {
+                $p2ScoreField = $isTech ? 20 : 35;
+            } else {
+                $p2ScoreField = $isTech ? 10 : 20;
+            }
+
             $activeKws = $fieldKws;
             if ($field === $identifiedField && isset($roleMatrices[$identifiedRole])) {
                 $activeKws = $roleMatrices[$identifiedRole];
@@ -1047,12 +1053,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $coreMatched = 0;
             $supportingMatched = 0;
             $p1 = 0;
+            $coreWeightField = $isTech ? 3 : 6;
+            $suppWeightField = $isTech ? 1 : 3;
 
             foreach ($activeKws['core'] as $keyword) {
                 $pattern = '/(?<![a-zA-Z0-9])' . preg_quote($keyword, '/') . '(?![a-zA-Z0-9])/i';
                 if (preg_match($pattern, $skillSearchText)) {
                     $coreMatched++;
-                    $p1 += 3;
+                    $p1 += $coreWeightField;
                 }
             }
 
@@ -1060,18 +1068,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pattern = '/(?<![a-zA-Z0-9])' . preg_quote($keyword, '/') . '(?![a-zA-Z0-9])/i';
                 if (preg_match($pattern, $skillSearchText)) {
                     $supportingMatched++;
-                    $p1 += 1;
+                    $p1 += $suppWeightField;
                 }
             }
 
-            $p1Cap = min($p1, 50);
-            $totalScore = $p1Cap + $pillar2Score + $pillar3Score;
+            $p1Cap = min($p1, $p1MaxField);
+            $totalScore = $p1Cap + $p2ScoreField + $pillar3Score;
 
             $fieldScores[$field] = $totalScore;
             $fieldDetails[$field] = [
                 'core_count' => $coreMatched,
                 'supporting_count' => $supportingMatched,
                 'p1_score' => $p1Cap,
+                'p2_score' => $p2ScoreField,
+                'p1_max' => $p1MaxField,
+                'p2_max' => $p2MaxField,
+                'core_weight' => $coreWeightField,
+                'supp_weight' => $suppWeightField,
                 'keywords' => $activeKws
             ];
         }
@@ -1088,8 +1101,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $matchedCoreCount = $fieldDetails[$identifiedField]['core_count'];
         $matchedSupportingCount = $fieldDetails[$identifiedField]['supporting_count'];
         $winningPillar1 = $fieldDetails[$identifiedField]['p1_score'];
-        $winningPillar2 = $pillar2Score;
-        $winningPillar3 = $pillar3Score;
+        $winningPillar2 = $fieldDetails[$identifiedField]['p2_score'];
+        $winningPillar3 = $winningPillar3Score = $pillar3Score;
+        $p1Max = $fieldDetails[$identifiedField]['p1_max'];
+        $p2Max = $fieldDetails[$identifiedField]['p2_max'];
+        $coreWeight = $fieldDetails[$identifiedField]['core_weight'];
+        $supportingWeight = $fieldDetails[$identifiedField]['supp_weight'];
 
         $archetypeEmoji = ($fieldIcons[$identifiedField] ?? '🤔') . ' ' . $identifiedRole;
 
@@ -1809,11 +1826,11 @@ $scoreLabel = get_score_label($atsScore);
         <!-- Score breakdown bars -->
         <div class="section-label">Score Breakdown (Click each bar to view detail rubric)</div>
         <div class="bar-row" data-target="rubric-p1">
-            <div class="bar-head"><span class="bar-head-title">Skill Match (Pillar 1)</span><span><?php echo $winningPillar1; ?> / 50</span></div>
-            <div class="bar-track"><div class="bar-fill contact" style="width:<?php echo ($winningPillar1 / 50) * 100; ?>%"></div></div>
+            <div class="bar-head"><span class="bar-head-title">Skill Match (Pillar 1)</span><span><?php echo $winningPillar1; ?> / <?php echo $p1Max; ?></span></div>
+            <div class="bar-track"><div class="bar-fill contact" style="width:<?php echo ($winningPillar1 / $p1Max) * 100; ?>%"></div></div>
         </div>
         <div id="rubric-p1" class="rubric-dropdown">
-            <div class="rubric-section-title">Core Skills (3 pts each)</div>
+            <div class="rubric-section-title">Core Skills (<?php echo $coreWeight; ?> pts each)</div>
             <ul class="rubric-list">
                 <?php foreach ($pillar1Details['core'] as $kw => $lines): 
                     $isMatched = !empty($lines);
@@ -1834,7 +1851,7 @@ $scoreLabel = get_score_label($atsScore);
                 <?php endforeach; ?>
             </ul>
 
-            <div class="rubric-section-title">Supporting Skills (1 pt each)</div>
+            <div class="rubric-section-title">Supporting Skills (<?php echo $supportingWeight; ?> pts each)</div>
             <ul class="rubric-list">
                 <?php foreach ($pillar1Details['supporting'] as $kw => $lines): 
                     $isMatched = !empty($lines);
@@ -1857,8 +1874,8 @@ $scoreLabel = get_score_label($atsScore);
         </div>
 
         <div class="bar-row" data-target="rubric-p2">
-            <div class="bar-head"><span class="bar-head-title">Tenure &amp; Longevity (Pillar 2)</span><span><?php echo $winningPillar2; ?> / 30</span></div>
-            <div class="bar-track"><div class="bar-fill keywords" style="width:<?php echo ($winningPillar2 / 30) * 100; ?>%"></div></div>
+            <div class="bar-head"><span class="bar-head-title">Tenure &amp; Longevity (Pillar 2)</span><span><?php echo $winningPillar2; ?> / <?php echo $p2Max; ?></span></div>
+            <div class="bar-track"><div class="bar-fill keywords" style="width:<?php echo ($winningPillar2 / $p2Max) * 100; ?>%"></div></div>
         </div>
         <div id="rubric-p2" class="rubric-dropdown">
             <div class="rubric-section-title">Experience Tiers</div>
@@ -1868,7 +1885,7 @@ $scoreLabel = get_score_label($atsScore);
                         <span class="rubric-badge <?php echo ($tenureYears >= 6) ? 'matched' : 'unmatched'; ?>">
                             <?php echo ($tenureYears >= 6) ? '✓ Active' : 'Tier'; ?>
                         </span>
-                        <strong>Senior Tier (6+ Years)</strong> — 30 points
+                        <strong>Senior Tier (6+ Years)</strong> — <?php echo $p2Max; ?> points
                     </div>
                 </li>
                 <li class="rubric-item <?php echo ($tenureYears >= 3 && $tenureYears < 6) ? 'matched' : 'unmatched'; ?>">
@@ -1876,7 +1893,7 @@ $scoreLabel = get_score_label($atsScore);
                         <span class="rubric-badge <?php echo ($tenureYears >= 3 && $tenureYears < 6) ? 'matched' : 'unmatched'; ?>">
                             <?php echo ($tenureYears >= 3 && $tenureYears < 6) ? '✓ Active' : 'Tier'; ?>
                         </span>
-                        <strong>Mid Tier (3-5 Years)</strong> — 20 points
+                        <strong>Mid Tier (3-5 Years)</strong> — <?php echo ($p2Max === 30 ? 20 : 35); ?> points
                     </div>
                 </li>
                 <li class="rubric-item <?php echo ($tenureYears < 3) ? 'matched' : 'unmatched'; ?>">
@@ -1884,7 +1901,7 @@ $scoreLabel = get_score_label($atsScore);
                         <span class="rubric-badge <?php echo ($tenureYears < 3) ? 'matched' : 'unmatched'; ?>">
                             <?php echo ($tenureYears < 3) ? '✓ Active' : 'Tier'; ?>
                         </span>
-                        <strong>Junior Tier (<3 Years)</strong> — 10 points
+                        <strong>Junior Tier (<3 Years)</strong> — <?php echo ($p2Max === 30 ? 10 : 20); ?> points
                     </div>
                 </li>
             </ul>
