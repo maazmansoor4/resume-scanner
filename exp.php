@@ -56,7 +56,21 @@ $winningKeywords        = [];
 function loadRolesMatrix(): array {
     $rolesFile = __DIR__ . DIRECTORY_SEPARATOR . 'roles.txt';
     if (!file_exists($rolesFile)) {
-        return ['matrix' => [], 'descriptions' => []];
+        $defaultMatrix = [
+            'Administrative' => ['Administrative Assistant', 'Office Manager', 'Receptionist', 'Executive Assistant'],
+            'Business Operations, HR & Executive' => ['Business Analyst', 'Product Manager', 'Project Manager', 'HR Manager', 'Operations Manager'],
+            'Construction, Manufacturing & Trades' => ['Architect', 'Electrician', 'Carpenter', 'Quality Assurance Engineer', 'Production Manager'],
+            'Customer Service & Hospitality' => ['Customer Service Representative', 'Barista', 'Chef', 'Hotel Manager'],
+            'Education' => ['Teacher', 'Tutor', 'Teaching Assistant'],
+            'Finance & Accounting' => ['Accountant', 'Financial Analyst', 'Bookkeeper', 'Controller'],
+            'Government, Legal & Public Safety' => ['Attorney', 'Paralegal', 'Security Officer', 'Police Officer'],
+            'Healthcare & Personal Care' => ['Registered Nurse', 'Medical Assistant', 'Pharmacist', 'Physical Therapist'],
+            'Marketing, Media & Design' => ['Designer', 'Graphic Designer', 'Marketing Manager', 'Social Media Specialist'],
+            'Retail, Sales & Real Estate' => ['Sales Representative', 'Account Executive', 'Store Manager', 'Real Estate Agent'],
+            'Technology & Engineering' => ['Software Engineer', 'Java Developer', 'DevOps Engineer', 'Front End Developer', 'Data Scientist', 'Data Analyst', 'Senior Engineer', 'Civil Engineer'],
+            'Transportation & Logistics' => ['Truck Driver', 'Warehouse Worker', 'Logistics Specialist', 'Dispatcher']
+        ];
+        return ['matrix' => $defaultMatrix, 'descriptions' => []];
     }
     $content = file_get_contents($rolesFile);
     $lines = explode("\n", $content);
@@ -147,6 +161,13 @@ function detectJobRoleAndField(string $resumeText, array $sections, array $parse
             $scores[$role] = 0;
             $roleToField[$role] = $field;
         }
+    }
+    
+    if (empty($scores)) {
+        return [
+            'role' => 'Software Engineer',
+            'field' => 'Technology & Engineering'
+        ];
     }
     
     $lines = explode("\n", $resumeText);
