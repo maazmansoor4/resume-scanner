@@ -541,12 +541,45 @@ function detectJobRoleAndField(string $resumeText, array $sections, array $parse
         }
     }
     
+    // Calculate field boosts based on skill keywords
+    global $fieldMatrices;
+    $fieldBoosts = [];
+    if (!empty($fieldMatrices)) {
+        foreach ($fieldMatrices as $f => $kws) {
+            $cnt = 0;
+            $combined = array_unique(array_merge($kws['core'], $kws['supporting']));
+            foreach ($combined as $kw) {
+                $kwPattern = '/(?<![a-zA-Z0-9])' . preg_quote($kw, '/') . '(?![a-zA-Z0-9])/i';
+                if (preg_match_all($kwPattern, $resumeText, $matches)) {
+                    $cnt += count($matches[0]);
+                }
+            }
+            $fieldBoosts[$f] = $cnt * 3;
+        }
+    }
+
+    $flagshipRoles = [
+        'Software Engineer' => 0.1,
+        'Software Developer' => 0.09,
+        'Administrative Assistant' => 0.1,
+        'Business Analyst' => 0.1,
+        'Customer Service Representative' => 0.1,
+        'Teacher' => 0.1,
+        'Accountant' => 0.1,
+        'Registered Nurse' => 0.1,
+        'Designer' => 0.1,
+        'Sales Representative' => 0.1
+    ];
+
     foreach ($scores as $role => $score) {
         $escapedRole = preg_quote($role, '/');
         $pattern = '/(?<![a-zA-Z0-9])' . $escapedRole . '(?![a-zA-Z0-9])/i';
         
         foreach ($expRoles as $expRole) {
             if (preg_match($pattern, $expRole)) {
+                if ($role === 'Server' && preg_match('/\b(?:database|web|system|network|sql|linux|windows|api|backend|dns|dhcp|devops|cloud|infrastructure)\b/i', $expRole)) {
+                    continue;
+                }
                 $scores[$role] += 15;
             }
         }
@@ -559,8 +592,27 @@ function detectJobRoleAndField(string $resumeText, array $sections, array $parse
             $scores[$role] += 8;
         }
         
-        if (preg_match_all($pattern, $resumeText, $matches)) {
-            $scores[$role] += count($matches[0]) * 2;
+        if ($role === 'Server') {
+            $bodyScore = 0;
+            if (preg_match_all('/(?<![a-zA-Z0-9])(?:restaurant|food|dining|bar|waiter|waitress|beverage|cocktail|lead|head|shift)\s+server(?![a-zA-Z0-9])/i', $resumeText, $matches)) {
+                $bodyScore = count($matches[0]) * 2;
+            }
+            $scores[$role] += $bodyScore;
+        } else {
+            if (preg_match_all($pattern, $resumeText, $matches)) {
+                $scores[$role] += count($matches[0]) * 2;
+            }
+        }
+
+        // Apply field boost
+        $fOfRole = $roleToField[$role] ?? '';
+        if ($fOfRole && isset($fieldBoosts[$fOfRole])) {
+            $scores[$role] += $fieldBoosts[$fOfRole];
+        }
+
+        // Apply flagship tie-breaker
+        if (isset($flagshipRoles[$role])) {
+            $scores[$role] += $flagshipRoles[$role];
         }
     }
     
@@ -927,6 +979,56 @@ function estimateTenure(string $text): int {
 }
 
 /**
+ * Calculate career longevity/tenure from date ranges of relevant jobs.
+ */
+function calculateTenureFromJobs(array $jobs, array $combinedKws, int $currentYear): int {
+    $yearsActive = [];
+    $monthsPattern = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|\d{1,2})';
+    $rangePattern = '#(?:' . $monthsPattern . '[\s\/-]+)?\b(19\d\d|20[0-4]\d)\s*(?:-|–|—|\/|to)\s*(?:' . $monthsPattern . '[\s\/-]+)?\b(20[0-4]\d|Present|Current|Now)\b#ui';
+
+    foreach ($jobs as $job) {
+        $title = $job['role'] ?? '';
+        $company = $job['company'] ?? '';
+        $bullets = implode(' ', $job['bullets'] ?? []);
+        $combinedText = $title . ' ' . $company . ' ' . $bullets;
+
+        // Check if job is relevant
+        $isRelevant = false;
+        if (empty($combinedKws)) {
+            $isRelevant = true;
+        } else {
+            foreach ($combinedKws as $kw) {
+                $pattern = '/(?<![a-zA-Z0-9])' . preg_quote($kw, '/') . '(?![a-zA-Z0-9])/i';
+                if (preg_match($pattern, $combinedText)) {
+                    $isRelevant = true;
+                    break;
+                }
+            }
+        }
+
+        if ($isRelevant && !empty($job['dates'])) {
+            if (preg_match_all($rangePattern, $job['dates'], $matches, PREG_SET_ORDER)) {
+                foreach ($matches as $match) {
+                    $start = (int)$match[1];
+                    $endVal = strtolower($match[2]);
+                    if (in_array($endVal, ['present', 'current', 'now'])) {
+                        $end = $currentYear;
+                    } else {
+                        $end = (int)$match[2];
+                    }
+                    if ($start <= $end && $start > 1950) {
+                        for ($y = $start; $y <= $end; $y++) {
+                            $yearsActive[$y] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return count($yearsActive);
+}
+
+/**
  * Check if the major/course of a degree is relevant to the matched field/role.
  */
 function isMajorRelevant(string $course, string $field, string $role): bool {
@@ -984,6 +1086,9 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
     $isFreshEdu = false;
     $freshYear = 0;
     $currentYear = (int)date('Y');
+    $highestGradYear = 0;
+    $hasPhDEnrolled = false;
+    $hasUndergradEnrolled = false;
 
     // 1. Identify all degrees by level
     $phds = [];
@@ -1013,25 +1118,62 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
             }
         }
 
-        // Try to find any year in the university or course line
-        if (preg_match('/\b(19\d\d|20[0-2]\d)\b/', $course . ' ' . $uni, $ym)) {
-            $allYears[] = (int)$ym[1];
+        // Try to find any year in the university or course line or details (preserved lines)
+        $gradYear = null;
+        $eduDetailsText = $course . ' ' . $uni . ' ' . (isset($edu['details']) ? implode(' ', $edu['details']) : '');
+        if (preg_match_all('/\b(19\d\d|20[0-4]\d)\b/', $eduDetailsText, $ym)) {
+            $yearsFound = array_map('intval', $ym[1]);
+            $minYear = min($yearsFound);
+            $maxYear = max($yearsFound);
+
+            // If the max year is in the future, it's definitely the graduation year
+            if ($maxYear > $currentYear) {
+                $gradYear = $maxYear;
+            } else {
+                // If it's a bachelor's and they are currently enrolled (or experience is Present),
+                // we can estimate graduation as minYear + 4 (if minYear is close to current year, e.g. >= currentYear - 4)
+                $isBach = preg_match('/\b(bachelors?|b\.s\.|b\.a\.|b\.sc\.|b\.e\.|b\.tech)\b/i', $course);
+                if ($isBach && $minYear >= $currentYear - 4) {
+                    $gradYear = $minYear + 4;
+                    $audit[] = "No future graduation year explicitly written; estimated graduation year as $gradYear (Start Year $minYear + 4).";
+                } else {
+                    $gradYear = $maxYear;
+                }
+            }
+
+            if ($gradYear <= $currentYear) {
+                $allYears[] = $gradYear;
+            }
+            if ($gradYear > $highestGradYear) {
+                $highestGradYear = $gradYear;
+            }
         }
 
         $cLower = strtolower($course);
+        $isFuture = ($gradYear !== null && $gradYear >= $currentYear);
+
         if (preg_match('/\b(ph\.?d|doctor|doctorate)\b/i', $cLower)) {
-            $phds[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu];
-        } elseif (preg_match('/\b(master|m\.s\.|m\.a\.|m\.sc\.|mba)\b/i', $cLower)) {
-            $masters[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu];
-        } elseif (preg_match('/\b(bachelor|b\.s\.|b\.a\.|b\.sc\.|b\.e\.|b\.tech)\b/i', $cLower)) {
-            $bachelors[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu];
+            if ($isFuture) {
+                $hasPhDEnrolled = true;
+            }
+            $phds[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu, 'gradYear' => $gradYear];
+        } elseif (preg_match('/\b(masters?|m\.s\.|m\.a\.|m\.sc\.|mba)\b/i', $cLower)) {
+            $masters[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu, 'gradYear' => $gradYear];
+        } elseif (preg_match('/\b(bachelors?|b\.s\.|b\.a\.|b\.sc\.|b\.e\.|b\.tech)\b/i', $cLower)) {
+            if ($isFuture) {
+                $hasUndergradEnrolled = true;
+            }
+            $bachelors[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu, 'gradYear' => $gradYear];
         }
     }
 
     // Try to find years in certification titles or from certifications block
     foreach ($parsedCert as $cert) {
-        if (preg_match('/\b(19\d\d|20[0-2]\d)\b/', $cert, $ym)) {
-            $allYears[] = (int)$ym[1];
+        if (preg_match('/\b(19\d\d|20[0-4]\d)\b/', $cert, $ym)) {
+            $yr = (int)$ym[1];
+            if ($yr <= $currentYear) {
+                $allYears[] = $yr;
+            }
         }
     }
 
@@ -1039,76 +1181,177 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
     $level = 'none';
     $baseScore = 0;
     $selectedDegreeInfo = '';
+    $isUndergradIntern = false;
+
+    // Check if employee is Intern level based on role match or ongoing university enrollment
+    $isInternRole = (bool)preg_match('/\b(intern|assistant|co-op|trainee|apprentice|student|clerk)\b/i', $role)
+        || ($highestGradYear >= $currentYear)
+        || $hasUndergradEnrolled;
 
     if (!empty($phds)) {
-        $level = 'phd';
-        $bestPhd = $phds[0];
-        $isRelevant = isMajorRelevant($bestPhd['course'], $field, $role);
-        $gpa = $bestPhd['gpa'];
-
-        // PhD GPA bounds: Min = 18 (at GPA 2.1), Max = 20 (at GPA 3.5) if relevant
-        // PhD GPA bounds (irrelevant): Min = 15, Max = 18
-        $gpaBounded = max(2.1, min(3.5, $gpa ?? 2.5));
-        $fraction = ($gpaBounded - 2.1) / (3.5 - 2.1);
-
-        if ($isRelevant) {
-            $baseScore = 18 + ($fraction * (20 - 18));
-            $audit[] = "Relevant PhD detected (GPA: " . ($gpa ?? 'N/A') . "). Interpolated score: " . round($baseScore, 2) . " points.";
-        } else {
-            $baseScore = 15 + ($fraction * (18 - 15));
-            $audit[] = "PhD detected in irrelevant field (GPA: " . ($gpa ?? 'N/A') . "). Interpolated score: " . round($baseScore, 2) . " points.";
+        // Find best PhD
+        $bestScoreForPhd = -1;
+        $selectedPhd = null;
+        foreach ($phds as $phd) {
+            $phdGpa = $phd['gpa'];
+            $phdIsRelevant = isMajorRelevant($phd['course'], $field, $role);
+            $gpaBounded = max(2.1, min(3.5, $phdGpa ?? 2.5));
+            $fraction = ($gpaBounded - 2.1) / (3.5 - 2.1);
+            $phdScore = $phdIsRelevant ? (18 + ($fraction * (20 - 18))) : (15 + ($fraction * (18 - 15)));
+            if ($phdScore > $bestScoreForPhd) {
+                $bestScoreForPhd = $phdScore;
+                $selectedPhd = $phd;
+            }
         }
-        $selectedDegreeInfo = "PhD in " . $bestPhd['course'];
+        if ($selectedPhd) {
+            $level = 'phd';
+            $bestPhd = $selectedPhd;
+            $gpa = $bestPhd['gpa'];
+            $isRelevant = isMajorRelevant($bestPhd['course'], $field, $role);
+            $gpaBounded = max(2.1, min(3.5, $gpa ?? 2.5));
+            $fraction = ($gpaBounded - 2.1) / (3.5 - 2.1);
+            if ($isRelevant) {
+                $baseScore = 18 + ($fraction * (20 - 18));
+                $audit[] = "Relevant PhD detected (" . $bestPhd['course'] . ") (GPA: " . ($gpa ?? 'N/A') . "). Interpolated score: " . round($baseScore, 2) . " points.";
+            } else {
+                $baseScore = 15 + ($fraction * (18 - 15));
+                $audit[] = "PhD detected in irrelevant field (" . $bestPhd['course'] . ") (GPA: " . ($gpa ?? 'N/A') . "). Interpolated score: " . round($baseScore, 2) . " points.";
+            }
+            $selectedDegreeInfo = "PhD in " . $bestPhd['course'];
+        }
     }
 
     if ($level === 'none' && !empty($masters)) {
-        $bestMaster = $masters[0];
-        $gpa = $bestMaster['gpa'];
-
-        if ($gpa !== null && $gpa <= 2.0) {
-            $audit[] = "Masters degree ignored due to low GPA (<= 2.0).";
-        } else {
+        // Find best Masters
+        $bestScoreForMaster = -1;
+        $selectedMaster = null;
+        foreach ($masters as $m) {
+            $mGpa = $m['gpa'];
+            if ($mGpa !== null && $mGpa <= 2.0) {
+                continue;
+            }
+            $mIsRelevant = isMajorRelevant($m['course'], $field, $role);
+            $gpaBounded = max(2.1, min(3.5, $mGpa ?? 2.5));
+            $fraction = ($gpaBounded - 2.1) / (3.5 - 2.1);
+            $mScore = $mIsRelevant ? (10 + ($fraction * (20 - 10))) : 10;
+            if ($mScore > $bestScoreForMaster) {
+                $bestScoreForMaster = $mScore;
+                $selectedMaster = $m;
+            }
+        }
+        if ($selectedMaster) {
             $level = 'masters';
+            $bestMaster = $selectedMaster;
+            $gpa = $bestMaster['gpa'];
             $isRelevant = isMajorRelevant($bestMaster['course'], $field, $role);
             $gpaBounded = max(2.1, min(3.5, $gpa ?? 2.5));
             $fraction = ($gpaBounded - 2.1) / (3.5 - 2.1);
-
             if ($isRelevant) {
-                // Masters Relevant: Min = 10 (at GPA 2.1), Max = 20 (at GPA 3.5)
                 $baseScore = 10 + ($fraction * (20 - 10));
-                $audit[] = "Relevant Masters detected (GPA: " . ($gpa ?? 'N/A') . "). Interpolated score: " . round($baseScore, 2) . " points.";
+                $audit[] = "Relevant Masters detected (" . $bestMaster['course'] . ") (GPA: " . ($gpa ?? 'N/A') . "). Interpolated score: " . round($baseScore, 2) . " points.";
             } else {
-                // Masters Irrelevant: Earns exactly 10 regardless of GPA/relevance
                 $baseScore = 10;
-                $audit[] = "Irrelevant Masters detected (GPA: " . ($gpa ?? 'N/A') . "). Scored exactly 10 points.";
+                $audit[] = "Irrelevant Masters detected (" . $bestMaster['course'] . ") (GPA: " . ($gpa ?? 'N/A') . "). Scored exactly 10 points.";
             }
             $selectedDegreeInfo = "Masters in " . $bestMaster['course'];
+        } else {
+            $audit[] = "Masters degrees ignored due to low GPA (<= 2.0).";
         }
     }
 
-    // Check bachelors if no valid PhD/Masters was matched yet
+    // Check bachelors / undergrad intern rules
     if ($level === 'none' && !empty($bachelors)) {
-        $bestBach = $bachelors[0];
-        $gpa = $bestBach['gpa'];
+        $bestScoreForBach = -1;
+        $selectedBach = null;
 
-        if ($gpa !== null && $gpa <= 2.0) {
-            $audit[] = "Bachelors degree ignored due to low GPA (<= 2.0).";
-        } else {
-            $level = 'bachelors';
-            $isRelevant = isMajorRelevant($bestBach['course'], $field, $role);
-            $gpaBounded = max(2.1, min(3.5, $gpa ?? 2.5));
-            $fraction = ($gpaBounded - 2.1) / (3.5 - 2.1);
+        foreach ($bachelors as $bach) {
+            $bachGpa = $bach['gpa'];
+            if ($bachGpa !== null && $bachGpa <= 2.0) {
+                continue;
+            }
 
-            if ($isRelevant) {
-                // Bachelors Relevant: Min = 8 (at GPA 2.1), Max = 15 (at GPA 3.5)
-                $baseScore = 8 + ($fraction * (15 - 8));
-                $audit[] = "Relevant Bachelors detected (GPA: " . ($gpa ?? 'N/A') . "). Interpolated score: " . round($baseScore, 2) . " points.";
+            $bachIsRelevant = isMajorRelevant($bach['course'], $field, $role);
+            $bachScore = 0;
+
+            // Undergrad Intern Rule: relevant major, intern-level role
+            if ($bachIsRelevant && $isInternRole && $highestGradYear >= $currentYear) {
+                $yearsToGrad = $highestGradYear - $currentYear;
+                $gpaVal = $bachGpa ?? 2.5;
+
+                // Max possible points for 4.0 GPA:
+                // Over 3 years: 15. Over 2 years and under 3: 20. Less than 2 years: 30.
+                if ($yearsToGrad > 3) {
+                    $maxGpaPoints = 15;
+                } elseif ($yearsToGrad >= 2 && $yearsToGrad <= 3) {
+                    $maxGpaPoints = 20;
+                } else {
+                    $maxGpaPoints = 30;
+                }
+
+                // Scale points based on GPA (2.1 to 3.5 minimum/maximum threshold check)
+                $gpaBounded = max(2.1, min(3.5, $gpaVal));
+                $fraction = ($gpaBounded - 2.1) / (3.5 - 2.1);
+                $bachScore = 8 + ($fraction * ($maxGpaPoints - 8));
             } else {
-                // Bachelors Irrelevant: can only earn 10, minimum 8. So Min = 8, Max = 10
-                $baseScore = 8 + ($fraction * (10 - 8));
-                $audit[] = "Irrelevant Bachelors detected (GPA: " . ($gpa ?? 'N/A') . "). Interpolated score: " . round($baseScore, 2) . " points.";
+                $gpaVal = $bachGpa ?? 2.5;
+                $gpaBounded = max(2.1, min(3.5, $gpaVal));
+                $fraction = ($gpaBounded - 2.1) / (3.5 - 2.1);
+
+                if ($bachIsRelevant) {
+                    $bachScore = 8 + ($fraction * (15 - 8));
+                } else {
+                    $bachScore = 8 + ($fraction * (10 - 8));
+                }
+            }
+
+            if ($bachScore > $bestScoreForBach) {
+                $bestScoreForBach = $bachScore;
+                $selectedBach = $bach;
+            }
+        }
+
+        if ($selectedBach !== null) {
+            $level = 'bachelors';
+            $bestBach = $selectedBach;
+            $gpa = $bestBach['gpa'];
+            $isRelevant = isMajorRelevant($bestBach['course'], $field, $role);
+
+            // Re-run for audit log generation and final baseScore setting
+            if ($isRelevant && $isInternRole && $highestGradYear >= $currentYear) {
+                $isUndergradIntern = true;
+                $yearsToGrad = $highestGradYear - $currentYear;
+                $gpaVal = $gpa ?? 2.5;
+
+                if ($yearsToGrad > 3) {
+                    $maxGpaPoints = 15;
+                    $audit[] = "Undergrad Intern Rule: relevant major (" . $bestBach['course'] . "), graduation > 3 years ($highestGradYear). Max GPA points: 15.";
+                } elseif ($yearsToGrad >= 2 && $yearsToGrad <= 3) {
+                    $maxGpaPoints = 20;
+                    $audit[] = "Undergrad Intern Rule: relevant major (" . $bestBach['course'] . "), graduation 2-3 years ($highestGradYear). Max GPA points: 20.";
+                } else {
+                    $maxGpaPoints = 30;
+                    $audit[] = "Undergrad Intern Rule: relevant major (" . $bestBach['course'] . "), graduation < 2 years ($highestGradYear). Max GPA points: 30.";
+                }
+
+                $gpaBounded = max(2.1, min(3.5, $gpaVal));
+                $fraction = ($gpaBounded - 2.1) / (3.5 - 2.1);
+                $baseScore = 8 + ($fraction * ($maxGpaPoints - 8));
+                $audit[] = "Undergrad Intern calculated score (GPA: $gpaVal, bounds 2.1-3.5): " . round($baseScore, 2) . " points.";
+            } else {
+                $gpaBounded = max(2.1, min(3.5, $gpa ?? 2.5));
+                $fraction = ($gpaBounded - 2.1) / (3.5 - 2.1);
+
+                if ($isRelevant) {
+                    $baseScore = 8 + ($fraction * (15 - 8));
+                    $audit[] = "Relevant Bachelors detected (" . $bestBach['course'] . ") (GPA: " . ($gpa ?? 'N/A') . "). Interpolated score: " . round($baseScore, 2) . " points.";
+                } else {
+                    $baseScore = 8 + ($fraction * (10 - 8));
+                    $audit[] = "Irrelevant Bachelors detected (" . $bestBach['course'] . ") (GPA: " . ($gpa ?? 'N/A') . "). Interpolated score: " . round($baseScore, 2) . " points.";
+                }
             }
             $selectedDegreeInfo = "Bachelors in " . $bestBach['course'];
+        } else {
+            $audit[] = "Bachelors degrees ignored due to low GPA (<= 2.0).";
         }
     }
 
@@ -1122,7 +1365,6 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
             foreach ($parsedCert as $cert) {
                 $cLower = strtolower($cert);
                 $activatesCore = false;
-                // Check core keywords
                 foreach ($activeKws['core'] as $kw) {
                     if (strpos($cLower, strtolower($kw)) !== false) {
                         $activatesCore = true;
@@ -1148,6 +1390,25 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
         }
     }
 
+    // PHD enrolled check: Add 3 to 5 points for a 2.0 to 3.5 GPA
+    if ($hasPhDEnrolled && $level !== 'phd') {
+        $phdGpa = 2.5; // default fallback
+        foreach ($parsedEdu as $edu) {
+            $course = $edu['course'] ?? '';
+            $gradeStr = $edu['grade'] ?? '';
+            if (preg_match('/\b(ph\.?d|doctor|doctorate)\b/i', $course)) {
+                if (preg_match('/\b([0-4]\.\d+)\b/', $gradeStr, $gm)) {
+                    $phdGpa = (float)$gm[1];
+                }
+            }
+        }
+        $gpaBounded = max(2.0, min(3.5, $phdGpa));
+        $fraction = ($gpaBounded - 2.0) / (3.5 - 2.0);
+        $phdBonus = 3 + ($fraction * (5 - 3));
+        $baseScore += $phdBonus;
+        $audit[] = "Candidate actively in a PhD program (undergrad/masters scored as highest degree). Added PhD active bonus: " . round($phdBonus, 2) . " points (GPA: $phdGpa).";
+    }
+
     // 2. Check fresh education age (< 4 years)
     if (!empty($allYears)) {
         $maxYear = max($allYears);
@@ -1159,7 +1420,8 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
     }
 
     // If education weight is increased to 30 points, points in education are multiplied by 1.5 and rounded
-    if ($isFreshEdu) {
+    // Skip multiplier if the undergrad intern rule was applied (which has its own 15/20/30 max score targets and weight shifts to 50)
+    if ($isFreshEdu && !$isUndergradIntern) {
         $originalBase = $baseScore;
         $baseScore = round($baseScore * 1.5);
         $audit[] = "Fresh graduation detected: points multiplied by 1.5 and rounded ($originalBase -> $baseScore).";
@@ -1176,8 +1438,14 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
 
     $finalScore = $experienceBasePoints + $educationEarnedPoints;
 
-    // Cap at the maximum allowed points (default 20, or 30 if fresh)
-    $maxCap = $isFreshEdu ? 30.0 : 20.0;
+    // Cap at the maximum allowed points (default 20, or 30 if fresh, or 50 if undergrad intern)
+    $maxCap = 20.0;
+    if ($isUndergradIntern) {
+        $maxCap = 50.0;
+    } elseif ($isFreshEdu) {
+        $maxCap = 30.0;
+    }
+
     if ($finalScore > $maxCap) {
         $finalScore = $maxCap;
         $audit[] = "Total score capped at maximum allowed: $maxCap points.";
@@ -1192,7 +1460,8 @@ function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenur
         'fresh_year' => $freshYear,
         'audit' => $audit,
         'earned_edu' => $educationEarnedPoints,
-        'base_exp' => $experienceBasePoints
+        'base_exp' => $experienceBasePoints,
+        'is_undergrad_intern' => $isUndergradIntern
     ];
 }
 
@@ -1207,11 +1476,11 @@ function getResumeSections(string $text): array {
     $headings = [
         'summary'        => ['/^(?:PROFESSIONAL\s+)?SUMMARY\b/im', '/^ABOUT\s+ME\b/im', '/^OBJECTIVE\b/im'],
         'experience'     => ['/^(?:WORK\s+|PROFESSIONAL\s+|EMPLOYMENT\s+)?EXPERIENCE\b/im', '/^WORK\s+HISTORY\b/im', '/^CAREER\s+HISTORY\b/im'],
-        'education'      => ['/^EDUCATION\b/im', '/^ACADEMIC\s+BACKGROUND\b/im'],
-        'projects'       => ['/^(?:PERSONAL\s+|ACADEMIC\s+|TECHNICAL\s+)?PROJECTS\b/im'],
-        'certifications' => ['/^CERTIFICATIONS\b/im', '/^CREDENTIALS\b/im', '/^LICENSES\b/im'],
-        'skills'         => ['/^(?:TECHNICAL\s+|KEY\s+)?SKILLS\b/im', '/^TECHNOLOGIES\b/im'],
-        'culture'        => ['/^INTERESTS\b/im', '/^HOBBIES\b/im', '/^PERSONAL\s+LIFE\b/im', '/^VOLUNTEER(?:ING)?\b/im', '/^COMMUNITY\b/im']
+        'education'      => ['/^(?:PROFESSIONAL\s+|ACADEMIC\s+)?EDUCATION\b/im', '/^ACADEMIC\s+BACKGROUND\b/im'],
+        'projects'       => ['/^(?:.*?\s+)?PROJECTS\b/im'],
+        'certifications' => ['/^(?:.*?\s+)?CERTIFICATIONS\b/im', '/^CREDENTIALS\b/im', '/^LICENSES\b/im'],
+        'skills'         => ['/^(?:TECHNICAL\s+|KEY\s+)?SKILLS\b/im', '/^(?:.*?\s+)?TECHNOLOGIES\b/im'],
+        'culture'        => ['/^(?:.*?\s+)?(?:INTERESTS|HOBBIES|VOLUNTEER(?:ING)?|COMMUNITY|ACTIVITIES|CAMPUS\s+INVOLVEMENT)\b/im']
     ];
 
     $sections = [];
@@ -1272,11 +1541,11 @@ function parseEducation(string $eduText): array {
         $line = trim($line);
         if (empty($line)) continue;
 
-        // Check if there is a GPA in the line
+        // Check if there is a GPA in the line, handling optional colon and full denominator scale
         $gpa = '';
-        if (preg_match('/\b(?:GPA|Grade|Score|Marks|CGPA)?\b\s*\(?\s*([0-4]\.\d+\s*(?:\/\s*4(?:\.0)?)?)\s*\)?/i', $line, $gm)) {
+        if (preg_match('/\b(?:GPA|Grade|Score|Marks|CGPA)?\s*[:\-–—]?\s*\(?\s*([0-4]\.\d+\s*(?:\/\s*[45](?:\.\d+)?)?)\s*\)?/i', $line, $gm)) {
             $gpa = $gm[0];
-            $lineCleaned = trim(str_replace($gpa, '', $line), " \t\n\r\0\x0B(),");
+            $lineCleaned = trim(str_replace($gpa, '', $line), " \t\n\r\0\x0B(),:-–—");
         } else {
             $lineCleaned = $line;
         }
@@ -1286,11 +1555,12 @@ function parseEducation(string $eduText): array {
 
         if ($isDegree) {
             if ($currentDegree && empty($currentDegree['course'])) {
-                // We had a pending university block (e.g. Pennsylvania State University) that had no degree course yet
+                // We had a pending university block that had no degree course yet
                 $currentDegree['course'] = $lineCleaned;
                 if (!empty($gpa)) {
                     $currentDegree['grade'] = $gpa;
                 }
+                $currentDegree['details'][] = $line;
             } else {
                 if ($currentDegree) {
                     $degrees[] = $currentDegree;
@@ -1298,7 +1568,8 @@ function parseEducation(string $eduText): array {
                 $currentDegree = [
                     'course' => $lineCleaned,
                     'university' => '',
-                    'grade' => $gpa
+                    'grade' => $gpa,
+                    'details' => [$line]
                 ];
             }
         } elseif ($isUni) {
@@ -1307,6 +1578,7 @@ function parseEducation(string $eduText): array {
                 if (!empty($gpa)) {
                     $currentDegree['grade'] = $gpa;
                 }
+                $currentDegree['details'][] = $line;
             } else {
                 if ($currentDegree) {
                     $degrees[] = $currentDegree;
@@ -1314,12 +1586,16 @@ function parseEducation(string $eduText): array {
                 $currentDegree = [
                     'course' => '',
                     'university' => $lineCleaned,
-                    'grade' => $gpa
+                    'grade' => $gpa,
+                    'details' => [$line]
                 ];
             }
         } else {
             if (!empty($gpa) && $currentDegree) {
                 $currentDegree['grade'] = $gpa;
+            }
+            if ($currentDegree) {
+                $currentDegree['details'][] = $line;
             }
         }
     }
@@ -1344,14 +1620,6 @@ function parseEducation(string $eduText): array {
         }
 
         if (!empty($course) || !empty($uni)) {
-            if (empty($course)) {
-                $course = 'Degree / Course Not Specified';
-            }
-            if (empty($uni)) {
-                $uni = 'Institution Not Specified';
-            }
-            $d['course'] = $course;
-            $d['university'] = $uni;
             $filtered[] = $d;
         }
     }
@@ -1611,6 +1879,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // SECTION 4 — ANALYSIS PIPELINE (runs on successful extraction)
     // =========================================================================
     if ($formSubmitted && !empty($resumeText)) {
+        $currentYear = (int)date('Y');
         $lowercaseText = strtolower($resumeText);
         $lines = explode("\n", trim($resumeText));
 
@@ -1695,13 +1964,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $activeKws = $roleMatrices[$identifiedRole];
             }
 
+            // Calculate tenure for this specific field using only relevant jobs
+            $fieldKwsList = $fieldMatrices[$field] ?? ['core' => [], 'supporting' => []];
+            $roleKwsList = (isset($roleMatrices[$identifiedRole]) && $field === $identifiedField) ? $roleMatrices[$identifiedRole] : ['core' => [], 'supporting' => []];
+            $combinedKws = array_unique(array_merge(
+                $fieldKwsList['core'],
+                $fieldKwsList['supporting'],
+                $roleKwsList['core'],
+                $roleKwsList['supporting']
+            ));
+            $tenureYearsField = calculateTenureFromJobs($parsedExp, $combinedKws, $currentYear);
+
             // Calculate Education & Certifications Score (Pillar 3)
-            $eduResult = calculateEducationScore($parsedEdu, $parsedCert, $tenureYears, $field, $identifiedRole === $identifiedRole && $field === $identifiedField ? $identifiedRole : $field, $skillSearchText, $activeKws);
+            $eduResult = calculateEducationScore($parsedEdu, $parsedCert, $tenureYearsField, $field, $identifiedRole === $identifiedRole && $field === $identifiedField ? $identifiedRole : $field, $skillSearchText, $activeKws);
             $p3ScoreField = $eduResult['score'];
             $isFreshEdu = $eduResult['is_fresh'];
+            $isUndergradIntern = $eduResult['is_undergrad_intern'] ?? false;
 
-            // Adjust weights if education is under 4 years old
-            if ($isFreshEdu) {
+            // Adjust weights and caps
+            if ($isUndergradIntern) {
+                // If undergrad intern rule is active: P3 weight increases to 50 points
+                // Tech fields: P1 = 30 points max, P2 = 20 points max, P3 = 50 points max. (Total = 100)
+                // Non-Tech fields: P1 = 20 points max, P2 = 30 points max, P3 = 50 points max. (Total = 100)
+                $p1MaxField = $isTech ? 30 : 20;
+                $p2MaxField = $isTech ? 20 : 30;
+                $p3MaxField = 50;
+            } elseif ($isFreshEdu) {
                 $p1MaxField = $isTech ? 42 : 26;
                 $p2MaxField = $isTech ? 28 : 44;
                 $p3MaxField = 30;
@@ -1712,7 +2000,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Pillar 2 tenure score calculation for this field
-            $Y = min($tenureYears, 20);
+            $Y = min($tenureYearsField, 20);
             if ($isTech) {
                 $p2ScoreField = ($Y >= 20) ? $p2MaxField : (int)round($p2MaxField * (1 - exp(-0.32 * $Y)));
             } else {
@@ -1757,7 +2045,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'core_weight' => $coreWeightField,
                 'supp_weight' => $suppWeightField,
                 'keywords' => $activeKws,
-                'edu_result' => $eduResult
+                'edu_result' => $eduResult,
+                'tenure_years' => $tenureYearsField
             ];
         }
 
@@ -1781,6 +2070,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $p3Max = $fieldDetails[$identifiedField]['p3_max'];
         $coreWeight = $fieldDetails[$identifiedField]['core_weight'];
         $supportingWeight = $fieldDetails[$identifiedField]['supp_weight'];
+        $tenureYears = $fieldDetails[$identifiedField]['tenure_years'];
 
         $archetypeEmoji = ($fieldIcons[$identifiedField] ?? '🤔') . ' ' . $identifiedRole;
 
