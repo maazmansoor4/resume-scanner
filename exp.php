@@ -926,6 +926,254 @@ function estimateTenure(string $text): int {
     return max($rangeYears, $explicitYears);
 }
 
+/**
+ * Check if the major/course of a degree is relevant to the matched field/role.
+ */
+function isMajorRelevant(string $course, string $field, string $role): bool {
+    $c = strtolower($course);
+    $r = strtolower($role);
+    $f = strtolower($field);
+
+    // Business Operations, HR, Sales, Administrative, Finance
+    if (strpos($f, 'business') !== false || strpos($f, 'admin') !== false || strpos($f, 'finance') !== false || strpos($f, 'sales') !== false || strpos($f, 'retail') !== false) {
+        $keywords = ['business', 'admin', 'manage', 'finance', 'account', 'mba', 'economics', 'hr', 'human resource', 'marketing', 'sales', 'commerce'];
+    }
+    // Technology & Engineering
+    elseif (strpos($f, 'technology') !== false || strpos($f, 'engineering') !== false) {
+        $keywords = ['computer', 'software', 'technology', 'system', 'it', 'engineering', 'science', 'developer', 'prog', 'data', 'network', 'web', 'cyber', 'information'];
+    }
+    // General engineering check
+    elseif (strpos($r, 'engineer') !== false) {
+        $keywords = ['engineering', 'science', 'physics', 'math', 'tech'];
+    }
+    // Construction & Trades
+    elseif (strpos($f, 'construction') !== false || strpos($f, 'manufacturing') !== false) {
+        $keywords = ['construction', 'machin', 'hvac', 'weld', 'automotive', 'architect', 'civil', 'engineer', 'trade', 'safety'];
+    }
+    // Healthcare
+    elseif (strpos($f, 'health') !== false) {
+        $keywords = ['nurs', 'medic', 'health', 'clinic', 'dent', 'pharm', 'therapy', 'biolog', 'vet'];
+    }
+    // Education
+    elseif (strpos($f, 'education') !== false) {
+        $keywords = ['education', 'teach', 'pedagogy', 'instruction', 'curriculum', 'child'];
+    }
+    // Legal & Public Safety
+    elseif (strpos($f, 'legal') !== false || strpos($f, 'government') !== false) {
+        $keywords = ['law', 'legal', 'crimin', 'justice', 'police', 'attorney', 'paralegal', 'safety'];
+    }
+    // Default fallback list
+    else {
+        $keywords = ['business', 'science', 'art', 'design', 'manage', 'communcation', 'media', 'journalism', 'hospitality', 'culinary', 'logistics', 'supply chain'];
+    }
+
+    foreach ($keywords as $kw) {
+        if (strpos($c, $kw) !== false) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Calculate the detailed Education & Certifications Score (Pillar 3).
+ * Returns array with score, audit logs/reasons, fresh-grad status, and highest graduation year.
+ */
+function calculateEducationScore(array $parsedEdu, array $parsedCert, int $tenureYears, string $field, string $role, string $skillSearchText, array $activeKws): array {
+    $audit = [];
+    $isFreshEdu = false;
+    $freshYear = 0;
+    $currentYear = (int)date('Y');
+
+    // 1. Identify all degrees by level
+    $phds = [];
+    $masters = [];
+    $bachelors = [];
+
+    // Extract graduation years from education block if present
+    // Keep track of the most recent graduation year to determine if the education is "fresh" (< 4 years old)
+    $allYears = [];
+
+    foreach ($parsedEdu as $edu) {
+        $course = $edu['course'] ?? '';
+        $uni = $edu['university'] ?? '';
+        $gradeStr = $edu['grade'] ?? '';
+
+        // Extract GPA
+        $gpa = null;
+        if (preg_match('/\b([0-4]\.\d+)\b/', $gradeStr, $gm)) {
+            $gpa = (float)$gm[1];
+        } else {
+            // Apply honors and fallback GPA rules
+            $fullEduText = $course . ' ' . $uni . ' ' . $gradeStr;
+            if (preg_match('/\b(magna\s+cum\s+laude|summa\s+cum\s+laude|cum\s+laude|honors?|distinction)\b/i', $fullEduText)) {
+                $gpa = 3.5;
+            } else {
+                $gpa = 2.5;
+            }
+        }
+
+        // Try to find any year in the university or course line
+        if (preg_match('/\b(19\d\d|20[0-2]\d)\b/', $course . ' ' . $uni, $ym)) {
+            $allYears[] = (int)$ym[1];
+        }
+
+        $cLower = strtolower($course);
+        if (preg_match('/\b(ph\.?d|doctor|doctorate)\b/i', $cLower)) {
+            $phds[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu];
+        } elseif (preg_match('/\b(master|m\.s\.|m\.a\.|m\.sc\.|mba)\b/i', $cLower)) {
+            $masters[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu];
+        } elseif (preg_match('/\b(bachelor|b\.s\.|b\.a\.|b\.sc\.|b\.e\.|b\.tech)\b/i', $cLower)) {
+            $bachelors[] = ['course' => $course, 'gpa' => $gpa, 'raw' => $edu];
+        }
+    }
+
+    // Try to find years in certification titles or from certifications block
+    foreach ($parsedCert as $cert) {
+        if (preg_match('/\b(19\d\d|20[0-2]\d)\b/', $cert, $ym)) {
+            $allYears[] = (int)$ym[1];
+        }
+    }
+
+    // Determine highest degree level of study
+    $level = 'none';
+    $baseScore = 0;
+    $selectedDegreeInfo = '';
+
+    if (!empty($phds)) {
+        $level = 'phd';
+        $bestPhd = $phds[0];
+        $isRelevant = isMajorRelevant($bestPhd['course'], $field, $role);
+        $gpa = $bestPhd['gpa'];
+
+        if ($isRelevant) {
+            $baseScore = ($gpa !== null && $gpa >= 3.5) ? 20 : 18;
+            $audit[] = "Relevant PhD detected (GPA: " . ($gpa ?? 'N/A') . "). Scored $baseScore points.";
+        } else {
+            $baseScore = ($gpa !== null && $gpa >= 3.5) ? 18 : 15;
+            $audit[] = "PhD detected in irrelevant field (GPA: " . ($gpa ?? 'N/A') . "). Scored $baseScore points.";
+        }
+        $selectedDegreeInfo = "PhD in " . $bestPhd['course'];
+    }
+
+    if ($level === 'none' && !empty($masters)) {
+        $bestMaster = $masters[0];
+        $gpa = $bestMaster['gpa'];
+
+        if ($gpa !== null && $gpa <= 2.0) {
+            $audit[] = "Masters degree ignored due to low GPA (<= 2.0).";
+        } else {
+            $level = 'masters';
+            $isRelevant = isMajorRelevant($bestMaster['course'], $field, $role);
+            if ($isRelevant) {
+                $baseScore = ($gpa !== null && $gpa >= 3.5) ? 20 : 10;
+                $audit[] = "Relevant Masters detected (GPA: " . ($gpa ?? 'N/A') . "). Scored $baseScore points.";
+            } else {
+                $baseScore = 10; // Irrelevant field maxes/earns exactly 10
+                $audit[] = "Irrelevant Masters detected (GPA: " . ($gpa ?? 'N/A') . "). Scored $baseScore points.";
+            }
+            $selectedDegreeInfo = "Masters in " . $bestMaster['course'];
+        }
+    }
+
+    // Check bachelors if no valid PhD/Masters was matched yet
+    if ($level === 'none' && !empty($bachelors)) {
+        $bestBach = $bachelors[0];
+        $gpa = $bestBach['gpa'];
+
+        if ($gpa !== null && $gpa <= 2.0) {
+            $audit[] = "Bachelors degree ignored due to low GPA (<= 2.0).";
+        } else {
+            $level = 'bachelors';
+            $isRelevant = isMajorRelevant($bestBach['course'], $field, $role);
+            if ($isRelevant) {
+                $baseScore = ($gpa !== null && $gpa >= 3.5) ? 15 : 8;
+                $audit[] = "Relevant Bachelors detected (GPA: " . ($gpa ?? 'N/A') . "). Scored $baseScore points.";
+            } else {
+                $baseScore = 10; // Irrelevant field can only earn 10, minimum 8 regardless
+                $audit[] = "Irrelevant Bachelors detected (GPA: " . ($gpa ?? 'N/A') . "). Scored 10 points.";
+            }
+            $selectedDegreeInfo = "Bachelors in " . $bestBach['course'];
+        }
+    }
+
+    // Certifications fallback if no degrees considered
+    if ($level === 'none') {
+        if (!empty($parsedCert)) {
+            $level = 'certifications';
+            $certPoints = 0;
+            $matchedCerts = [];
+
+            foreach ($parsedCert as $cert) {
+                $cLower = strtolower($cert);
+                $activatesCore = false;
+                // Check core keywords
+                foreach ($activeKws['core'] as $kw) {
+                    if (strpos($cLower, strtolower($kw)) !== false) {
+                        $activatesCore = true;
+                        break;
+                    }
+                }
+
+                if ($activatesCore) {
+                    $certPoints += 3;
+                    $matchedCerts[] = "$cert (+3 pts, core)";
+                } else {
+                    $certPoints += 1;
+                    $matchedCerts[] = "$cert (+1 pt)";
+                }
+            }
+
+            $baseScore = min($certPoints, 10);
+            $selectedDegreeInfo = "Certifications / Bootcamps (" . count($parsedCert) . " found)";
+            $audit[] = "No degrees evaluated. Certifications fallback scored $baseScore/10 points. Details: " . implode(', ', $matchedCerts);
+        } else {
+            $selectedDegreeInfo = "No qualifications detected";
+            $audit[] = "No degrees or certifications found.";
+        }
+    }
+
+    // 2. Check fresh education age (< 4 years)
+    if (!empty($allYears)) {
+        $maxYear = max($allYears);
+        if ($maxYear >= ($currentYear - 4) && $maxYear <= $currentYear) {
+            $isFreshEdu = true;
+            $freshYear = $maxYear;
+            $audit[] = "Education considered is fresh (Graduation year: $maxYear, under 4 years old). Weight increased to 30 points.";
+        }
+    }
+
+    // 3. Experienced Candidate modifier (> 5 years tenure)
+    $educationEarnedPoints = $baseScore;
+    $experienceBasePoints = 0;
+    if ($tenureYears > 5) {
+        $experienceBasePoints = 7;
+        $educationEarnedPoints = $baseScore / 2.0;
+        $audit[] = "Candidate has > 5 years experience ($tenureYears Years). Base 7 points awarded; education points halved ($baseScore -> $educationEarnedPoints).";
+    }
+
+    $finalScore = $experienceBasePoints + $educationEarnedPoints;
+
+    // Cap at the maximum allowed points (default 20, or 30 if fresh)
+    $maxCap = $isFreshEdu ? 30.0 : 20.0;
+    if ($finalScore > $maxCap) {
+        $finalScore = $maxCap;
+        $audit[] = "Total score capped at maximum allowed: $maxCap points.";
+    }
+
+    return [
+        'score' => (int)round($finalScore),
+        'base_score' => $baseScore,
+        'level' => $level,
+        'degree_info' => $selectedDegreeInfo,
+        'is_fresh' => $isFreshEdu,
+        'fresh_year' => $freshYear,
+        'audit' => $audit,
+        'earned_edu' => $educationEarnedPoints,
+        'base_exp' => $experienceBasePoints
+    ];
+}
+
 // -------------------------------------------------------------------------
 // SECTION 2.1 — STRUCTURAL SECTION EXTRACTION AND PARSING
 // -------------------------------------------------------------------------
@@ -1389,23 +1637,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         foreach ($fieldMatrices as $field => $fieldKws) {
             $isTech = ($field === 'Technology & Engineering');
-            $p1MaxField = $isTech ? 50 : 30;
-            $p2MaxField = $isTech ? 30 : 50;
-
-            // Pillar 2 tenure score calculation for this field
-            // Technical fields: steep decay ($p2Score = round(30 * (1 - exp(-0.32 * $Y)))), capped at 20 years (30 pts max)
-            // Non-technical fields: flatter decay ($p2Score = round(50 * (1 - exp(-0.16 * $Y)))), capped at 20 years (50 pts max)
-            $Y = min($tenureYears, 20);
-            if ($isTech) {
-                $p2ScoreField = ($Y >= 20) ? 30 : (int)round(30 * (1 - exp(-0.32 * $Y)));
-            } else {
-                $p2ScoreField = ($Y >= 20) ? 50 : (int)round(50 * (1 - exp(-0.16 * $Y)));
-            }
-
-
             $activeKws = $fieldKws;
             if ($field === $identifiedField && isset($roleMatrices[$identifiedRole])) {
                 $activeKws = $roleMatrices[$identifiedRole];
+            }
+
+            // Calculate Education & Certifications Score (Pillar 3)
+            $eduResult = calculateEducationScore($parsedEdu, $parsedCert, $tenureYears, $field, $identifiedRole === $identifiedRole && $field === $identifiedField ? $identifiedRole : $field, $skillSearchText, $activeKws);
+            $p3ScoreField = $eduResult['score'];
+            $isFreshEdu = $eduResult['is_fresh'];
+
+            // Adjust weights if education is under 4 years old
+            if ($isFreshEdu) {
+                $p1MaxField = $isTech ? 42 : 26;
+                $p2MaxField = $isTech ? 28 : 44;
+                $p3MaxField = 30;
+            } else {
+                $p1MaxField = $isTech ? 50 : 30;
+                $p2MaxField = $isTech ? 30 : 50;
+                $p3MaxField = 20;
+            }
+
+            // Pillar 2 tenure score calculation for this field
+            $Y = min($tenureYears, 20);
+            if ($isTech) {
+                $p2ScoreField = ($Y >= 20) ? $p2MaxField : (int)round($p2MaxField * (1 - exp(-0.32 * $Y)));
+            } else {
+                $p2ScoreField = ($Y >= 20) ? $p2MaxField : (int)round($p2MaxField * (1 - exp(-0.16 * $Y)));
             }
 
             $coreMatched = 0;
@@ -1431,7 +1689,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $p1Cap = min($p1, $p1MaxField);
-            $totalScore = $p1Cap + $p2ScoreField + $pillar3Score;
+            $totalScore = $p1Cap + $p2ScoreField + $p3ScoreField;
 
             $fieldScores[$field] = $totalScore;
             $fieldDetails[$field] = [
@@ -1439,11 +1697,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'supporting_count' => $supportingMatched,
                 'p1_score' => $p1Cap,
                 'p2_score' => $p2ScoreField,
+                'p3_score' => $p3ScoreField,
                 'p1_max' => $p1MaxField,
                 'p2_max' => $p2MaxField,
+                'p3_max' => $p3MaxField,
                 'core_weight' => $coreWeightField,
                 'supp_weight' => $suppWeightField,
-                'keywords' => $activeKws
+                'keywords' => $activeKws,
+                'edu_result' => $eduResult
             ];
         }
 
@@ -1460,9 +1721,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $matchedSupportingCount = $fieldDetails[$identifiedField]['supporting_count'];
         $winningPillar1 = $fieldDetails[$identifiedField]['p1_score'];
         $winningPillar2 = $fieldDetails[$identifiedField]['p2_score'];
-        $winningPillar3 = $winningPillar3Score = $pillar3Score;
+        $winningPillar3 = $fieldDetails[$identifiedField]['p3_score'];
+        $winningEduResult = $fieldDetails[$identifiedField]['edu_result'];
         $p1Max = $fieldDetails[$identifiedField]['p1_max'];
         $p2Max = $fieldDetails[$identifiedField]['p2_max'];
+        $p3Max = $fieldDetails[$identifiedField]['p3_max'];
         $coreWeight = $fieldDetails[$identifiedField]['core_weight'];
         $supportingWeight = $fieldDetails[$identifiedField]['supp_weight'];
 
@@ -2273,31 +2536,53 @@ $scoreLabel = get_score_label($atsScore);
         </div>
 
         <div class="bar-row" data-target="rubric-p3">
-            <div class="bar-head"><span class="bar-head-title">Quantifiable Impact (Pillar 3)</span><span><?php echo $winningPillar3; ?> / 20</span></div>
-            <div class="bar-track"><div class="bar-fill impact" style="width:<?php echo ($winningPillar3 / 20) * 100; ?>%"></div></div>
+            <div class="bar-head"><span class="bar-head-title">Education &amp; Certifications (Pillar 3)</span><span><?php echo $winningPillar3; ?> / <?php echo $p3Max; ?></span></div>
+            <div class="bar-track"><div class="bar-fill impact" style="width:<?php echo ($winningPillar3 / $p3Max) * 100; ?>%"></div></div>
         </div>
         <div id="rubric-p3" class="rubric-dropdown">
-            <div class="rubric-section-title">Impact Rubric</div>
+            <div class="rubric-section-title">Education Rubric Details</div>
             <p style="margin-bottom: 10px; color: var(--text-muted); font-size: 0.8rem;">
-                Earns <strong>5 points</strong> per unique line that quantifies achievements (requires a number and an action verb) up to a maximum of 4 lines (20 points total).
+                Evaluates PhD, Masters, Bachelors, or Certifications/Bootcamps (highest considered).
+                <?php if ($winningEduResult['is_fresh']): ?>
+                    <br><strong style="color: var(--primary);">✦ Fresh Education bonus active (under 4 years old): Max P3 points raised to 30!</strong>
+                <?php endif; ?>
             </p>
+
             <ul class="rubric-list">
-                <?php 
-                for ($i = 0; $i < 4; $i++): 
-                    $hasMetric = isset($extractedMetrics[$i]);
-                ?>
-                    <li class="rubric-item <?php echo $hasMetric ? 'matched' : 'unmatched'; ?>">
+                <li class="rubric-item matched">
+                    <div class="rubric-item-header">
+                        <span class="rubric-badge matched">
+                            ✓ Status
+                        </span>
+                        <strong>Level Evaluated:</strong> <?php echo htmlspecialchars(ucfirst($winningEduResult['level'])); ?>
+                    </div>
+                    <?php if (!empty($winningEduResult['degree_info'])): ?>
+                        <div class="rubric-quote">Selected Qualification: <?php echo htmlspecialchars($winningEduResult['degree_info']); ?></div>
+                    <?php endif; ?>
+                </li>
+
+                <?php if ($tenureYears > 5): ?>
+                    <li class="rubric-item matched">
                         <div class="rubric-item-header">
-                            <span class="rubric-badge <?php echo $hasMetric ? 'matched' : 'unmatched'; ?>">
-                                <?php echo $hasMetric ? '✓ Matched (+5 pts)' : '✗ Empty'; ?>
+                            <span class="rubric-badge matched">
+                                ✓ Reached
                             </span>
-                            <strong>Metric Line <?php echo ($i + 1); ?></strong>
+                            <strong>Experienced Candidate:</strong> +7 points base (tenure > 5 years), all education points halved.
                         </div>
-                        <?php if ($hasMetric): ?>
-                            <div class="rubric-quote">"<?php echo htmlspecialchars($extractedMetrics[$i]); ?>"</div>
-                        <?php endif; ?>
                     </li>
-                <?php endfor; ?>
+                <?php endif; ?>
+            </ul>
+
+            <div class="rubric-section-title" style="margin-top: 14px;">Calculation Audit Logs</div>
+            <ul class="rubric-list">
+                <?php foreach ($winningEduResult['audit'] as $log): ?>
+                    <li class="rubric-item matched" style="font-size: 0.8rem; margin-bottom: 6px;">
+                        <div style="display: flex; gap: 8px; align-items: flex-start;">
+                            <span style="color: var(--primary);">•</span>
+                            <span><?php echo htmlspecialchars($log); ?></span>
+                        </div>
+                    </li>
+                <?php endforeach; ?>
             </ul>
         </div>
 
@@ -2508,8 +2793,8 @@ $scoreLabel = get_score_label($atsScore);
         <div class="tips-card">
             <strong>💡 Suggestions to optimize score</strong>
             <?php if ($winningPillar1 < 35): ?>• Boost archetype density (list key tools: Docker, Terraform, React, Go, etc.).<br><?php endif; ?>
-            <?php if ($winningPillar2 < 30): ?>• Add date ranges to clearly indicate professional experience spans.<br><?php endif; ?>
-            <?php if ($winningPillar3 < 20): ?>• Quantify your achievements (e.g. "Reduced database query time by 30% by refactoring indices").<br><?php endif; ?>
+            <?php if ($winningPillar2 < 15): ?>• Add date ranges or explicitly declare your years of professional experience.<br><?php endif; ?>
+            <?php if ($winningPillar3 < $p3Max): ?>• Ensure you specify your degree type (PhD, Masters, Bachelors) along with a high GPA (3.5+) and a relevant major, or list core certifications.<br><?php endif; ?>
         </div>
         <?php endif; ?>
 
