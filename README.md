@@ -1,6 +1,6 @@
-[![Built with Claude Code](https://shields.io)](https://claude.ai)
-[![Developed in Antigravity](https://shields.io)](https://antigravity.google)
-[![AI Generated](https://shields.io)](https://github.com)
+[![Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-D97757?style=flat)](https://claude.com/claude-code)
+[![Google Antigravity](https://img.shields.io/badge/Google-Antigravity-4285F4?style=flat)](https://antigravity.google)
+[![AI Generated](https://img.shields.io/badge/AI-Generated-brightgreen?style=flat)]()
 
 # Resume Scanner & ATS Analyzer
 
