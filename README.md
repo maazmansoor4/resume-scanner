@@ -1,3 +1,7 @@
+[![Built with Claude Code](https://shields.io)](https://claude.ai)
+[![Developed in Antigravity](https://shields.io)](https://antigravity.google)
+[![AI Generated](https://shields.io)](https://github.com)
+
 # Resume Scanner & ATS Analyzer
 
 An interactive web application designed to help job seekers parse, analyze, and optimize their resumes against specific job descriptions using AI. 
